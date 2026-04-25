@@ -1,0 +1,17 @@
+node_modules/
+dist/
+*.zip
+tests/
+
+.DS_Store
+.vite/
+coverage/
+*.tsbuildinfo
+
+.playwright-mcp/
+.agents/
+.claude/
+docs/
+
+CLAUDE.md
+example.html

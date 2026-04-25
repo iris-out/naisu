@@ -1,0 +1,117 @@
+/* NAISU 플로팅 패널 — 우하단 고정, 컴팩트 */
+#naisu-root{
+  --naisu-fg:#111;
+  --naisu-bg:#fafaf7;
+  --naisu-r:#d91919;
+  --naisu-mid:#666;
+  --naisu-soft:#e5e5e2;
+  font-family:"Pretendard Variable","Pretendard",-apple-system,BlinkMacSystemFont,system-ui,sans-serif;
+  color:var(--naisu-fg);
+  position:fixed;
+  right:16px;bottom:16px;
+  z-index:2147483647;
+  width:280px;
+  max-width:calc(100vw - 32px);
+  pointer-events:none;
+}
+#naisu-root *{box-sizing:border-box;pointer-events:auto}
+
+.naisu-panel{
+  background:var(--naisu-bg);
+  border:2px solid var(--naisu-fg);
+  box-shadow:3px 3px 0 var(--naisu-r);
+  font-size:12.5px;
+  user-select:none;
+  transition:box-shadow .15s, border-color .15s;
+}
+/* 실행 중일 때 강조 */
+.naisu-panel.running{
+  border-color:var(--naisu-r);
+  box-shadow:3px 3px 0 var(--naisu-r), 0 0 0 3px rgba(217,25,25,.12);
+}
+
+.np-h{
+  display:grid;grid-template-columns:auto auto 1fr auto;align-items:center;gap:6px;
+  padding:6px 9px;border-bottom:1px solid var(--naisu-fg);
+  background:var(--naisu-fg);color:var(--naisu-bg);
+  cursor:grab;
+}
+.np-h:active{cursor:grabbing}
+.np-h .brand{font-weight:900;font-size:12px;letter-spacing:.04em}
+.np-h .head-info{
+  display:flex;justify-content:flex-end;gap:8px;font-size:11px;
+  font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;
+}
+.np-h .head-info .anlas-mini{color:#fff;font-weight:600}
+.np-h .head-info .prog-mini{color:#bbb;text-overflow:ellipsis;overflow:hidden}
+.np-h .toggle{
+  background:transparent;border:1px solid #555;color:#fff;
+  padding:1px 7px;font:inherit;font-size:11px;cursor:pointer;
+}
+.np-h .toggle:hover{background:#fff;color:var(--naisu-fg)}
+
+/* 헤더 접힘 버튼 — 접혔을 때만 표시 */
+.np-h-btns{display:none;gap:4px}
+.naisu-panel.collapsed .np-h-btns{display:flex}
+.naisu-panel.collapsed .brand{display:none}
+.naisu-panel.collapsed .np-h{padding:9px 9px}
+.np-h-btns .h-btn-auto,
+.np-h-btns .h-btn-dl{
+  background:transparent;border:1px solid #555;color:#fff;
+  padding:2px 8px;font:inherit;font-size:11px;font-weight:700;cursor:pointer;
+  white-space:nowrap;
+}
+.np-h-btns .h-btn-auto:hover,.np-h-btns .h-btn-dl:hover{background:#fff;color:var(--naisu-fg)}
+.np-h-btns .h-btn-auto[data-running="1"]{border-color:var(--naisu-r);color:var(--naisu-r)}
+.np-h-btns .h-btn-auto[data-running="1"]:hover{background:var(--naisu-r);color:#fff;border-color:var(--naisu-r)}
+
+/* 헤더 바로 밑 진행바 — 접혔을 때도 보임 */
+.np-mini-bar{height:2px;background:#dcd6c0;border-bottom:1px solid var(--naisu-fg)}
+.np-mini-bar > span{display:block;height:100%;width:0%;background:var(--naisu-r);transition:width .25s}
+
+.np-b{padding:8px 10px}
+.naisu-panel.collapsed .np-b{display:none}
+.naisu-panel.collapsed{box-shadow:2px 2px 0 var(--naisu-r)}
+
+/* 컨트롤 한 줄 */
+.np-row.count-row{
+  display:grid;
+  grid-template-columns:50px auto 1fr 28px;
+  gap:4px;align-items:center;
+}
+.np-row.count-row > input.count{
+  background:var(--naisu-bg);border:1px solid var(--naisu-fg);color:var(--naisu-fg);
+  padding:4px 4px;font:inherit;font-size:13px;font-weight:700;text-align:center;
+  font-variant-numeric:tabular-nums;width:100%;
+}
+.np-row.count-row > input.count:focus{outline:none;border-color:var(--naisu-r)}
+.np-row.count-row > .count-hint{color:var(--naisu-mid);font-size:11px;padding-right:4px}
+.np-row.count-row > button{
+  background:var(--naisu-bg);border:1px solid var(--naisu-fg);
+  padding:5px 0;font:inherit;font-size:11.5px;font-weight:700;cursor:pointer;color:var(--naisu-fg);
+  white-space:nowrap;
+}
+.np-row.count-row > button.pri{background:var(--naisu-fg);color:var(--naisu-bg)}
+.np-row.count-row > button.r{border-color:var(--naisu-r);color:var(--naisu-r)}
+.np-row.count-row > button:disabled{opacity:.35;cursor:not-allowed}
+.np-row.count-row > button:hover:not(:disabled){background:var(--naisu-fg);color:var(--naisu-bg)}
+.np-row.count-row > button.r:hover:not(:disabled){background:var(--naisu-r);color:var(--naisu-bg)}
+.np-row.count-row > button.pri:hover{background:#000}
+
+/* 수동 저장 한 줄 */
+.np-row.manual-row{margin-top:4px}
+.np-row.manual-row > button{
+  width:100%;background:transparent;border:1px solid var(--naisu-fg);
+  padding:5px 0;font:inherit;font-size:11.5px;font-weight:700;cursor:pointer;color:var(--naisu-fg);
+}
+.np-row.manual-row > button:hover{background:var(--naisu-fg);color:var(--naisu-bg)}
+.np-row.manual-row > button:active{opacity:.75}
+
+.np-log{
+  background:#fff;border:1px solid var(--naisu-soft);padding:5px 7px;margin-top:6px;
+  font-size:11px;line-height:1.5;color:var(--naisu-mid);
+  max-height:80px;overflow:auto;font-variant-numeric:tabular-nums;
+}
+.np-log:empty{display:none}
+.np-log em{color:var(--naisu-r);font-style:normal;font-weight:700}
+.np-log s{color:#1a7f3a;text-decoration:none;font-weight:700}

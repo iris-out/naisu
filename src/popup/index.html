@@ -1,0 +1,274 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <title>NAISU</title>
+  <link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
+  <link rel="stylesheet" href="./popup.css">
+</head>
+<body>
+  <main id="app">
+
+    <!-- ===== HOME ===== -->
+    <section class="screen" data-screen="home">
+      <header class="hd">
+        <div class="brand">NAISU<span style="color:var(--r)">.</span></div>
+        <div class="hd-stat" id="head-stat">대기 중</div>
+      </header>
+
+      <div class="anlas-card">
+        <div>
+          <div class="lbl">남은 Anlas</div>
+          <div class="big" id="anlas">—</div>
+        </div>
+      </div>
+
+      <!-- 메뉴 리스트 -->
+      <nav class="menu">
+        <button class="m-row" data-nav="batch">
+          <span class="m-ttl">배치</span>
+          <span class="m-val" id="m-batch-val">—</span>
+          <span class="m-ch">›</span>
+        </button>
+        <button class="m-row" data-nav="storage">
+          <span class="m-ttl">다운로드</span>
+          <span class="m-val" id="m-storage-val">—</span>
+          <span class="m-ch">›</span>
+        </button>
+        <button class="m-row" data-nav="safety">
+          <span class="m-ttl">안전 설정</span>
+          <span class="m-val" id="m-safety-val">—</span>
+          <span class="m-ch">›</span>
+        </button>
+        <button class="m-row" data-nav="discord">
+          <span class="m-ttl">Discord</span>
+          <span class="m-val" id="m-discord-val">없음</span>
+          <span class="m-ch">›</span>
+        </button>
+        <button class="m-row" data-nav="history">
+          <span class="m-ttl">제작 이력</span>
+          <span class="m-val" id="m-history-val">—</span>
+          <span class="m-ch">›</span>
+        </button>
+        <button class="m-row" data-nav="about">
+          <span class="m-ttl">정보</span>
+          <span class="m-val" id="m-about-val">—</span>
+          <span class="m-ch">›</span>
+        </button>
+      </nav>
+
+      <div class="home-actions">
+        <button class="btn-ghost" id="reset-ui-pos">UI 위치 초기화</button>
+      </div>
+
+      <footer class="ft">
+        <span id="hint">자동으로 저장됩니다</span>
+      </footer>
+    </section>
+
+    <!-- ===== BATCH ===== -->
+    <section class="screen" data-screen="batch" hidden>
+      <header class="hd sub">
+        <button class="back" data-nav="home">←</button>
+        <h2>배치</h2>
+      </header>
+
+      <div class="card">
+        <label class="row sw-row">
+          <span>
+            <span class="row-ttl">변형 사용</span>
+            <span class="row-sub">매 장마다 프롬프트 일부를 바꿔 가며 생성합니다</span>
+          </span>
+          <span class="switch" id="use-presets-sw"></span>
+        </label>
+        <div class="constraint-note" id="preset-constraint-note" hidden>
+          시드가 고정된 상태에서는 변형을 끌 수 없습니다.
+        </div>
+        <div class="sw-divider"></div>
+        <label class="row sw-row">
+          <span>
+            <span class="row-ttl">매번 새 시드</span>
+            <span class="row-sub">같은 프롬프트라도 매번 다른 이미지를 생성합니다</span>
+          </span>
+          <span class="switch" id="random-seed-sw"></span>
+        </label>
+        <div class="constraint-note" id="seed-constraint-note" hidden>
+          변형이 꺼진 상태에서는 시드를 고정할 수 없습니다.
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="lbl">기본 프롬프트 <span class="hint">모든 이미지에 공통으로 들어갑니다</span></div>
+        <textarea id="fixed-prompt" rows="3" placeholder="예: 1girl, masterpiece, best quality"></textarea>
+      </div>
+
+      <div class="card" id="presets-card">
+        <div class="card-h">
+          <span>변형 <span class="hint" id="preset-ct">0개</span></span>
+          <span class="seg mini" id="mode-toggle">
+            <button data-v="sequential" class="on">순서대로</button>
+            <button data-v="random">무작위</button>
+          </span>
+        </div>
+        <div class="hint mini" style="margin:0 0 8px">기본 프롬프트 뒤에 한 줄씩 추가됩니다 (예: smile, standing)</div>
+        <div class="pset" id="presets"></div>
+      </div>
+
+      <div class="card">
+        <div class="kv-line">
+          <span class="kv-key">반복 횟수<button class="qmark" data-tip="변형 목록 전체를 몇 번 돌릴지 설정합니다. 변형 8개 × 반복 5 = 총 40장.">?</button></span>
+          <input id="repeats" type="number" min="1" value="1">
+          <span class="kv-suf hint" id="totals">→ 0장</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===== STORAGE ===== -->
+    <section class="screen" data-screen="storage" hidden>
+      <header class="hd sub">
+        <button class="back" data-nav="home">←</button>
+        <h2>다운로드</h2>
+      </header>
+
+      <div class="card">
+        <div class="lbl">저장 방식</div>
+        <div class="seg" id="dl-mode-2" role="radiogroup">
+          <button data-v="clean" class="on">클린</button>
+          <button data-v="raw">원본</button>
+          <button data-v="both">둘 다</button>
+        </div>
+        <div class="hint mini" style="margin-top:6px">클린 — 프롬프트 등 생성 정보를 제거하고 저장합니다</div>
+      </div>
+
+      <div class="card">
+        <label class="full">
+          <span class="lbl">저장 폴더</span>
+          <input id="folder" type="text" value="naisu">
+        </label>
+        <label class="full" style="margin-top:8px">
+          <span class="lbl">파일 이름</span>
+          <input id="filename-tpl" type="text" value="{datetime}_{seed}">
+        </label>
+        <div class="tok" id="filename-tokens">
+          <span>{seed}</span><span>{model}</span><span>{w}</span><span>{h}</span><span>{steps}</span><span>{datetime}</span><span>{idx}</span>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="lbl">메타데이터</div>
+        <label class="row sw-row">
+          <span>
+            <span class="row-ttl">색상 프로파일 유지</span>
+            <span class="row-sub">ICC 프로파일을 보존합니다. 보통은 꺼도 됩니다.</span>
+          </span>
+          <span class="switch" id="keep-color-sw"></span>
+        </label>
+      </div>
+    </section>
+
+    <!-- ===== SAFETY ===== -->
+    <section class="screen" data-screen="safety" hidden>
+      <header class="hd sub">
+        <button class="back" data-nav="home">←</button>
+        <h2>안전 설정</h2>
+      </header>
+
+      <div class="card">
+        <div class="hint mini" style="margin-bottom:10px">배치 실행 중 자동으로 멈출 조건을 설정합니다.</div>
+
+        <div class="kv-line">
+          <span class="kv-key">Anlas 최솟값<button class="qmark" data-tip="남은 Anlas가 이 값보다 적으면 배치를 자동으로 멈춥니다.">?</button></span>
+          <input type="number" id="anlas-floor" min="0" value="100">
+        </div>
+        <div class="kv-line">
+          <span class="kv-key">생성 간격<button class="qmark" data-tip="이미지 사이의 대기 시간입니다 (밀리초). 너무 짧으면 서버에 부담이 됩니다.">?</button></span>
+          <input type="number" id="cooldown" min="0" value="1500"> ms
+        </div>
+        <div class="kv-line">
+          <span class="kv-key">오류 재시도<button class="qmark" data-tip="연속으로 실패할 수 있는 최대 횟수입니다. 초과하면 배치가 멈춥니다. (1초 → 2초 → 4초 간격으로 재시도)">?</button></span>
+          <input type="number" id="retries" min="0" value="3"> 회
+        </div>
+        <div class="kv-line">
+          <span class="kv-key">생성 제한 시간<button class="qmark" data-tip="이미지 한 장에 허용하는 최대 대기 시간입니다. 초과하면 실패로 처리합니다.">?</button></span>
+          <input type="number" id="timeout" min="10" value="60"> 초
+        </div>
+      </div>
+    </section>
+
+    <!-- ===== DISCORD ===== -->
+    <section class="screen" data-screen="discord" hidden>
+      <header class="hd sub">
+        <button class="back" data-nav="home">←</button>
+        <h2>Discord</h2>
+      </header>
+
+      <div class="card">
+        <label class="full">
+          <span class="lbl">Webhook URL</span>
+          <input type="text" id="webhook-url" placeholder="https://discord.com/api/webhooks/...">
+        </label>
+        <button class="btn" id="webhook-test" style="margin-top:8px;width:100%">테스트 전송</button>
+      </div>
+
+      <div class="card">
+        <div class="lbl">알림 이벤트</div>
+        <label class="row sw-row"><span class="row-ttl">배치 시작</span><span class="switch" data-ev="start"></span></label>
+        <label class="row sw-row">
+          <span>
+            <span class="row-ttl">진행 상황</span>
+            <span class="row-sub">매 <input type="number" id="progress-every" value="10" style="width:48px"> 장마다</span>
+          </span>
+          <span class="switch" data-ev="progress"></span>
+        </label>
+        <label class="row sw-row"><span class="row-ttl">이미지마다</span><span class="switch" data-ev="item"></span></label>
+        <label class="row sw-row"><span class="row-ttl">일시정지</span><span class="switch" data-ev="pause"></span></label>
+        <label class="row sw-row"><span class="row-ttl">배치 완료</span><span class="switch" data-ev="done"></span></label>
+        <label class="row sw-row"><span class="row-ttl">오류</span><span class="switch" data-ev="error"></span></label>
+      </div>
+    </section>
+
+    <!-- ===== HISTORY ===== -->
+    <section class="screen" data-screen="history" hidden>
+      <header class="hd sub">
+        <button class="back" data-nav="home">←</button>
+        <h2>제작 이력</h2>
+        <button class="btn hist-clear-btn" id="history-clear-btn" style="margin-left:auto;font-size:11px;padding:4px 10px">전체 삭제</button>
+      </header>
+      <div id="history-list"></div>
+      <div id="history-empty" class="empty-state" hidden>아직 저장된 이력이 없습니다<br><span style="font-size:11px">NAI에서 이미지를 생성하면 자동으로 저장됩니다</span></div>
+    </section>
+
+    <!-- ===== ABOUT ===== -->
+    <section class="screen" data-screen="about" hidden>
+      <header class="hd sub">
+        <button class="back" data-nav="home">←</button>
+        <h2>정보</h2>
+      </header>
+
+      <div class="about-brand">
+        <div class="about-logo">NAISU<span style="color:var(--r)">.</span></div>
+        <div class="about-ver" id="about-version">v—</div>
+        <div class="about-desc">NovelAI 이미지 보조 도구</div>
+      </div>
+
+      <div class="card">
+        <div class="kv-line">
+          <span class="kv-key">저장소 사용량</span>
+          <span id="about-storage" style="font-variant-numeric:tabular-nums">—</span>
+        </div>
+        <div class="kv-line">
+          <span class="kv-key">저장된 이력</span>
+          <span id="about-hist-count" style="font-variant-numeric:tabular-nums">—</span>
+        </div>
+      </div>
+
+      <div class="card" style="display:flex;flex-direction:column;gap:8px">
+        <button class="btn" id="reset-settings-btn" style="width:100%">설정 초기화</button>
+        <button class="btn" id="reset-data-btn" style="width:100%">이력 초기화</button>
+      </div>
+    </section>
+
+  </main>
+  <script type="module" src="./popup.ts"></script>
+</body>
+</html>
