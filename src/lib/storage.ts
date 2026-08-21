@@ -5,7 +5,14 @@
 
 import type { NaiMetadata } from './types';
 
-export type DownloadMode = 'clean' | 'raw' | 'both';
+/**
+ * 하드클린 — 매직 바이트 탐지에 의존하지 않고 이미지를 픽셀 단위로 다시 그려서
+ * RGB 값만 남긴다(알파는 전부 불투명으로). 원본 파일의 픽셀·컨테이너 데이터를 아예
+ * 물려받지 않으므로 알파 LSB든 RGB LSB든 알려지지 않은 은닉 방식이든 다 제거된다.
+ * 클린 — 기존 방식(매직 바이트를 찾아서 alpha LSB만 소거). 원본 — 아무것도 안 지움.
+ * 둘 다 — 클린 파일 + 원본 파일을 함께 저장 (하드클린이 아니라 항상 클린 기준).
+ */
+export type DownloadMode = 'hardclean' | 'clean' | 'raw' | 'both';
 
 export interface PromptPreset {
   id: string;

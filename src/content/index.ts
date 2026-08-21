@@ -1,14 +1,14 @@
 /**
  * NAI 페이지 진입점.
  * - 항상 보이는 플로팅 패널 마운트
- * - 패널의 ▶ 실행 버튼 → runBatch
+ * - 패널의 ▶ 자동으로 버튼 → runBatch
  * - popup/options 로부터의 메시지 (배치 시작/중단, Anlas 조회)
  */
 
 import './overlay.css';
 import { mountPanel, unmountPanel, getToast } from './overlay';
 import { runBatch, stopBatch, pauseBatch, isRunning } from './runner';
-import { readAnlas, SEL } from './selectors';
+import { readAnlas, findMainImage, SEL } from './selectors';
 import { blobUrlToBytes, bytesToBase64 } from './dom-helpers';
 import { getSettings, renderFilename } from '../lib/storage';
 import { parseNaiWebP, summarize } from '../lib/nai-metadata';
@@ -28,9 +28,7 @@ function wireHandlers(): void {
 // 수동 저장 버튼 → 현재 화면의 결과 이미지를 즉시 다운로드
 async function manualDownload(): Promise<void> {
   const toast = getToast();
-  const imgs = Array.from(document.querySelectorAll<HTMLImageElement>(SEL.resultImage));
-  const img = imgs.find((el) => el.src.startsWith('blob:') && el.offsetParent !== null)
-    ?? imgs.find((el) => el.src.startsWith('blob:'));
+  const img = findMainImage();
   if (!img) {
     toast.log('저장할 이미지 없음 — 먼저 NAI에서 이미지를 생성하세요', 'bad');
     return;

@@ -105,7 +105,8 @@
       <div class="card" id="presets-card">
         <div class="card-h">
           <span>변형 <span class="hint" id="preset-ct">0개</span></span>
-          <span class="seg mini" id="mode-toggle">
+          <span class="seg mini" id="mode-toggle" style="--seg-n:2">
+            <span class="seg-indicator"></span>
             <button data-v="sequential" class="on">순서대로</button>
             <button data-v="random">무작위</button>
           </span>
@@ -132,12 +133,14 @@
 
       <div class="card">
         <div class="lbl">저장 방식</div>
-        <div class="seg" id="dl-mode-2" role="radiogroup">
+        <div class="seg" id="dl-mode-2" role="radiogroup" style="--seg-n:4">
+          <span class="seg-indicator"></span>
+          <button data-v="hardclean">하드클린</button>
           <button data-v="clean" class="on">클린</button>
           <button data-v="raw">원본</button>
           <button data-v="both">둘 다</button>
         </div>
-        <div class="hint mini" style="margin-top:6px">클린 — 프롬프트 등 생성 정보를 제거하고 저장합니다</div>
+        <div class="hint mini" id="dl-mode-desc" style="margin-top:6px">클린 — 프롬프트 등 생성 정보를 제거하고 저장합니다</div>
       </div>
 
       <div class="card">

@@ -60,8 +60,36 @@ function bindSwitch(el: HTMLElement, value: boolean, onChange: (v: boolean) => v
     if (el.classList.contains('locked')) return;
     const next = !el.classList.contains('on');
     apply(next);
+    el.classList.remove('just-toggled');
+    void el.offsetWidth;
+    el.classList.add('just-toggled');
     await onChange(next);
   });
+}
+
+// ---- 세그먼트 토글 (슬라이딩 인디케이터) ----
+// 컨테이너에 `--seg-i`(선택된 버튼 인덱스)를 세팅하면 CSS가 인디케이터를 그만큼 이동시킨다.
+// 반환값으로 값 기준 활성화 함수를 돌려줘서, 스토리지에서 읽어온 초기값을 클릭 없이도 반영할 수 있다.
+function bindSeg(
+  container: HTMLElement,
+  initial: string,
+  onChange: (v: string) => void | Promise<void>,
+): (v: string) => void {
+  const btns = Array.from(container.querySelectorAll<HTMLButtonElement>('button'));
+  const activate = (v: string) => {
+    btns.forEach((b) => b.classList.toggle('on', b.dataset.v === v));
+    const idx = Math.max(0, btns.findIndex((b) => b.dataset.v === v));
+    container.style.setProperty('--seg-i', String(idx));
+  };
+  btns.forEach((b) => {
+    b.addEventListener('click', () => {
+      const v = b.dataset.v!;
+      activate(v);
+      void onChange(v);
+    });
+  });
+  activate(initial);
+  return activate;
 }
 
 // ---- 메뉴 라벨 갱신 ----
@@ -87,7 +115,18 @@ async function refreshHomeMenu() {
   if (aboutVal) aboutVal.textContent = `v${manifest.version}`;
 }
 function labelDl(m: DownloadMode) {
-  return m === 'clean' ? '클린' : m === 'raw' ? '원본' : '둘 다';
+  return m === 'hardclean' ? '하드클린' : m === 'clean' ? '클린' : m === 'raw' ? '원본' : '둘 다';
+}
+
+const DL_MODE_DESC: Record<DownloadMode, string> = {
+  hardclean: '하드클린 — 픽셀을 다시 그려 RGB 값만 남깁니다. 가장 안전하지만 투명도가 사라지고 살짝 느립니다.',
+  clean: '클린 — 프롬프트 등 생성 정보를 제거하고 저장합니다.',
+  raw: '원본 — 프롬프트 등 생성 정보를 그대로 담아 저장합니다.',
+  both: '둘 다 — 클린 파일과 원본 파일을 함께 저장합니다.',
+};
+function setDlModeDesc(mode: DownloadMode) {
+  const el = $('#dl-mode-desc');
+  if (el) el.textContent = DL_MODE_DESC[mode];
 }
 
 // ---- 활성 탭 ----
@@ -184,10 +223,13 @@ function renderPresets() {
     const input = row.querySelector('input')!;
     input.addEventListener('input', () => { p.text = input.value; void persistTemplate(); });
     row.querySelector('button')?.addEventListener('click', () => {
-      template.presets = template.presets.filter((x) => x.id !== p.id);
-      void persistTemplate();
-      renderPresets();
-      renderTotals();
+      row.classList.add('is-removing');
+      setTimeout(() => {
+        template.presets = template.presets.filter((x) => x.id !== p.id);
+        void persistTemplate();
+        renderPresets();
+        renderTotals();
+      }, 150);
     });
     wrap.appendChild(row);
   });
@@ -270,13 +312,9 @@ async function bindBatch() {
     renderTotals();
   });
 
-  $$('#mode-toggle button').forEach((b) => {
-    b.classList.toggle('on', b.dataset.v === template.mode);
-    b.addEventListener('click', () => {
-      template.mode = b.dataset.v as VariationMode;
-      $$('#mode-toggle button').forEach((x) => x.classList.toggle('on', x === b));
-      void persistTemplate();
-    });
+  bindSeg($('#mode-toggle')!, template.mode, (v) => {
+    template.mode = v as VariationMode;
+    void persistTemplate();
   });
 
   renderPresets();
@@ -287,21 +325,13 @@ async function bindBatch() {
 // ---- 저장 설정 ----
 async function bindStorage() {
   const s = await getSettings();
-  // 다운로드 모드 — 두 개 위치 (홈+상세) 동기화
-  const syncDl = (active: DownloadMode) => {
-    $$('#dl-mode-2 button').forEach((b) => {
-      b.classList.toggle('on', b.dataset.v === active);
-    });
-  };
-  syncDl(s.downloadMode);
-  $$('#dl-mode-2 button').forEach((b) => {
-    b.addEventListener('click', async () => {
-      const v = b.dataset.v as DownloadMode;
-      syncDl(v);
-      await setSettings({ downloadMode: v });
-      setHint('저장됨');
-    });
+  bindSeg($('#dl-mode-2')!, s.downloadMode, async (v) => {
+    const mode = v as DownloadMode;
+    setDlModeDesc(mode);
+    await setSettings({ downloadMode: mode });
+    setHint('저장됨');
   });
+  setDlModeDesc(s.downloadMode);
 
   bindInput('#folder', s.downloadFolder, async (v) => { await setSettings({ downloadFolder: v }); });
   bindInput('#filename-tpl', s.filenameTemplate, async (v) => { await setSettings({ filenameTemplate: v }); });

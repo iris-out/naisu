@@ -30,7 +30,6 @@ export const SEL = {
 
   // 결과 이미지
   resultImage: '.image-gen-main img.image-grid-image',
-  displayGridTop: '.display-grid-top',
   displayGridBottom: '.display-grid-bottom',
   displayGridImages: '.display-grid-images',
 
@@ -91,6 +90,53 @@ export function readAnlas(): number | null {
   if (!text) return null;
   const n = Number(text);
   return Number.isFinite(n) ? n : null;
+}
+
+/**
+ * 현재 화면에 크게 표시된(선택된) 결과 이미지.
+ *
+ * NAI의 결과 그리드는 "메인 프리뷰 하나 + 썸네일들"이 서로 다른 컴포넌트가 아니다.
+ * 배치/히스토리의 이미지들이 전부 같은 그리드 셀 컴포넌트(`img.image-grid-image`)로
+ * 렌더링되고, 그중 "선택된" 셀만 부모가 계산한 크기를 크게 줘서 커 보일 뿐이다.
+ * 그 크기 배정은 애니메이션되므로(Framer Motion), 렌더 크기 비교("가장 큰 이미지")로
+ * 추론하면 전환 도중이거나 History 패널이 같은 클래스를 재사용하는 경우 엉뚱한
+ * 이미지가 걸릴 수 있다 — 실제로 선택된 것 바로 옆 이미지가 저장되는 버그로 나타났다.
+ *
+ * 그래서 클래스/크기로 추론하는 대신, 화면 중앙(캔버스 중앙)에 실제로 그려진 요소가
+ * 뭔지 브라우저에게 직접 물어본다(`elementsFromPoint`). 사용자가 보고 있는 자리를
+ * 픽셀 단위로 히트테스트하는 것이라 DOM 구조·애니메이션·클래스 재사용에 흔들리지 않는다.
+ */
+export function findMainImage(): HTMLImageElement | null {
+  const hit = hitTestMainImage();
+  if (hit) return hit;
+
+  // 폴백 — 캔버스가 패닝/줌되어 중앙에 이미지가 없는 등 히트테스트가 실패한 경우
+  const candidates = Array.from(document.querySelectorAll<HTMLImageElement>(SEL.resultImage)).filter(
+    (el) => el.src.startsWith('blob:') && el.offsetParent !== null,
+  );
+  if (candidates.length === 0) return null;
+  return candidates.reduce((best, cur) =>
+    cur.offsetWidth * cur.offsetHeight > best.offsetWidth * best.offsetHeight ? cur : best,
+  );
+}
+
+function hitTestMainImage(): HTMLImageElement | null {
+  const container =
+    document.querySelector<HTMLElement>(SEL.imageGenBody) ??
+    document.querySelector<HTMLElement>(SEL.imageGenMain);
+  if (!container) return null;
+
+  const rect = container.getBoundingClientRect();
+  if (rect.width === 0 || rect.height === 0) return null;
+  const cx = rect.left + rect.width / 2;
+  const cy = rect.top + rect.height / 2;
+
+  // elementFromPoint(최상단 하나만)은 hover 툴바 같은 투명 오버레이에 가려질 수 있으니
+  // z-순서로 쌓인 요소들을 전부 훑어 첫 번째 blob 이미지를 찾는다.
+  for (const el of document.elementsFromPoint(cx, cy)) {
+    if (el instanceof HTMLImageElement && el.src.startsWith('blob:')) return el;
+  }
+  return null;
 }
 
 /** 라벨 텍스트로 인접한 number input 찾기 (Steps/Guidance 등) */

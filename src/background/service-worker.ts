@@ -8,12 +8,13 @@
  */
 
 import { stripMetadata, parseWebP } from '../lib/webp-riff';
+import type { DownloadMode } from '../lib/storage';
 
 interface DownloadReq {
   type: 'naisu.download';
   payload: {
     bytes: string; // base64
-    mode: 'clean' | 'raw' | 'both';
+    mode: DownloadMode;
     folder: string;
     filename: string;
     strip: { keepIccp: boolean };
@@ -99,16 +100,52 @@ async function stripStealthAlpha(bytes: Uint8Array): Promise<Uint8Array> {
   }
 }
 
+/**
+ * 하드클린 — stripStealthAlpha는 stealth_pngcomp 매직 바이트를 먼저 찾은 뒤에만 지우기
+ * 때문에, 그 탐지 자체가 실패하면(디코드 경로에 따라 alpha LSB가 미묘하게 달라질 수 있음 —
+ * 예: OS/GPU별 캔버스 프리멀티플라이 알파 반올림 차이) 조용히 원본을 그대로 반환해버린다.
+ * 게다가 알려지지 않은 방식으로 RGB 채널에 숨긴 데이터는 애초에 손도 안 댄다.
+ *
+ * 하드클린은 그런 탐지에 전혀 의존하지 않는다. 이미지를 픽셀 단위로 다시 그려서 RGB
+ * 값만 남기고(알파는 전부 불투명으로), 완전히 새 WebP 컨테이너로 재인코딩한다.
+ * 원본 파일의 픽셀·컨테이너 데이터를 아예 물려받지 않으므로 어떤 은닉 방식이든
+ * 원천적으로 사라진다. 대신 알파(투명도)가 필요한 이미지는 불투명해진다.
+ */
+async function hardCleanReencode(bytes: Uint8Array): Promise<Uint8Array> {
+  if (!parseWebP(bytes).isWebP) return bytes;
+  try {
+    const bitmap = await createImageBitmap(new Blob([bytes.slice()], { type: 'image/webp' }));
+    const { width, height } = bitmap;
+    const canvas = new OffscreenCanvas(width, height);
+    const ctx = canvas.getContext('2d')!;
+    ctx.drawImage(bitmap, 0, 0);
+    bitmap.close();
+    const id = ctx.getImageData(0, 0, width, height);
+    const data = id.data;
+
+    // 알파를 전부 불투명(255)으로 — RGB 픽셀 값만 남기고 그 외 모든 채널의 데이터를 버림
+    for (let i = 3; i < data.length; i += 4) data[i] = 255;
+    ctx.putImageData(id, 0, 0);
+
+    const blob = await canvas.convertToBlob({ type: 'image/webp', quality: 1.0 });
+    return new Uint8Array(await blob.arrayBuffer());
+  } catch {
+    return bytes;
+  }
+}
+
 async function handleDownload(req: DownloadReq): Promise<{ saved: string[]; errors?: string[] }> {
   const { bytes, mode, folder, filename, strip } = req.payload;
   const raw = b64ToBytes(bytes);
 
   // mode 별로 저장할 (data, suffix) 작업 목록
   const tasks: Array<{ data: Uint8Array; suffix: string }> = [];
-  if (mode === 'clean' || mode === 'both') {
+  if (mode === 'hardclean' || mode === 'clean' || mode === 'both') {
     const riffCleaned = stripMetadata(raw, strip);
-    const cleaned = await stripStealthAlpha(riffCleaned);
-    tasks.push({ data: cleaned, suffix: '' });          // 클린이 기본(접미사 없음)
+    // '둘 다'는 하드클린이 아니라 항상 (기존)클린 + 원본 조합
+    const cleaned =
+      mode === 'hardclean' ? await hardCleanReencode(riffCleaned) : await stripStealthAlpha(riffCleaned);
+    tasks.push({ data: cleaned, suffix: '' });          // 클린류가 기본(접미사 없음)
   }
   if (mode === 'raw' || mode === 'both') {
     tasks.push({ data: raw, suffix: mode === 'both' ? '_raw' : '' }); // both면 _raw 접미사

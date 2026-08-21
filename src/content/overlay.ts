@@ -10,6 +10,10 @@ import { totalCount } from '../lib/prompt-variator';
 
 const ROOT_ID = 'naisu-root';
 
+// 화살표 하나만으로는 "다운로드"인지 애매해서, 화살표+트레이로 된 표준 다운로드 아이콘을 직접 그림
+const DOWNLOAD_ICON =
+  '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12"/><path d="M7 10l5 5 5-5"/><path d="M4 20h16"/></svg>';
+
 export interface ToastApi {
   show(): void;
   hide(): void;
@@ -18,7 +22,7 @@ export interface ToastApi {
   setStatus(status: string): void;
   onPause(handler: () => void): void;
   onStop(handler: () => void): void;
-  /** 사용자가 ▶ 실행 클릭. count 인자는 패널 입력란의 값 */
+  /** 사용자가 ▶ 자동으로 클릭. count 인자는 패널 입력란의 값 */
   onStart(handler: (count: number) => void): void;
   /** 사용자가 수동 저장 버튼 클릭 */
   onManualDownload(handler: () => Promise<void>): void;
@@ -54,6 +58,7 @@ let pauseHandler: (() => void) | null = null;
 let stopHandler: (() => void) | null = null;
 let startHandler: ((count: number) => void) | null = null;
 let manualDlHandler: (() => Promise<void>) | null = null;
+let wasRunning = false;
 
 export function unmountPanel(): void {
   panel?.remove();
@@ -64,6 +69,7 @@ export function unmountPanel(): void {
   stopHandler = null;
   startHandler = null;
   manualDlHandler = null;
+  wasRunning = false;
 }
 
 export function mountPanel(forceTopLeft = false): void {
@@ -77,7 +83,7 @@ export function mountPanel(forceTopLeft = false): void {
         <div class="brand">NAISU</div>
         <div class="np-h-btns">
           <button class="h-btn-auto" title="자동 다운로드 시작">▶ 자동</button>
-          <button class="h-btn-dl" title="현재 이미지 저장">↓ 저장</button>
+          <button class="h-btn-dl" title="현재 이미지 저장">${DOWNLOAD_ICON} 저장</button>
         </div>
         <div class="head-info">
           <span class="anlas-mini">—</span>
@@ -89,12 +95,9 @@ export function mountPanel(forceTopLeft = false): void {
       <div class="np-b">
         <div class="np-row count-row">
           <input class="count" type="number" min="1" value="1" title="생성할 장수">
-          <span class="count-hint">장</span>
-          <button class="pri" data-batch="startpause" data-action="start">▶ 실행</button>
-          <button class="r" data-batch="stop" title="중단" disabled>✕</button>
-        </div>
-        <div class="np-row manual-row">
-          <button data-manual="dl" title="현재 이미지를 저장">현재 이미지 저장</button>
+          <button class="pri" data-batch="startpause" data-action="start">▶ 자동으로</button>
+          <button class="icon" data-manual="dl" title="현재 이미지 저장">${DOWNLOAD_ICON}</button>
+          <button class="icon r" data-batch="stop" title="중단" disabled>✕</button>
         </div>
         <div class="np-log log"></div>
       </div>
@@ -220,11 +223,18 @@ export function mountPanel(forceTopLeft = false): void {
       const active = running || paused;
       els!.card.classList.toggle('running', active);
       els!.btnStop.disabled = !active;
+      // 대기 → 실행으로 새로 진입할 때만 짧게 펄스 (상태 문자열이 바뀔 때마다 재생하지 않도록)
+      if (running && !wasRunning) {
+        els!.card.classList.remove('pulse');
+        void els!.card.offsetWidth;
+        els!.card.classList.add('pulse');
+      }
+      wasRunning = running;
       // 통합 실행/일시정지/재개 버튼
       const spAction = running ? 'pause' : paused ? 'resume' : 'start';
       els!.btnStartPause.dataset.action = spAction;
       els!.btnStartPause.textContent =
-        spAction === 'pause' ? '❚❚ 일시정지' : spAction === 'resume' ? '▶ 재개' : '▶ 실행';
+        spAction === 'pause' ? '❚❚ 일시정지' : spAction === 'resume' ? '▶ 재개' : '▶ 자동으로';
       els!.btnStartPause.disabled = false;
       // 헤더 버튼 동기화 (접힘 상태 버튼)
       const hAction = running ? 'pause' : paused ? 'resume' : 'start';
@@ -272,13 +282,10 @@ async function refreshCountDefault(): Promise<void> {
   const total = totalCount(t);
   if (document.activeElement === els.countInput) return; // 사용자 입력 중이면 무시
   els.countInput.value = String(Math.max(1, total));
-  const hint = els.root.querySelector('.count-hint') as HTMLElement;
-  if (hint) {
-    hint.textContent =
-      t.usePresets && t.presets.length > 0
-        ? `장 (변형 ${t.presets.length}개)`
-        : '장 (시드만)';
-  }
+  els.countInput.title =
+    t.usePresets && t.presets.length > 0
+      ? `생성할 장수 · 변형 ${t.presets.length}개`
+      : '생성할 장수 · 시드만 변경';
 }
 
 /** 헤더 잡고 드래그 — 위치는 chrome.storage에 저장 */
