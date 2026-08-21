@@ -22,36 +22,59 @@ export function setReactInputValue(el: HTMLInputElement | HTMLTextAreaElement, v
   el.dispatchEvent(new Event('change', { bubbles: true }));
 }
 
-/** 새 결과 이미지가 등장할 때까지 대기 */
+/** 새 결과 이미지(들)가 등장할 때까지 대기 */
 export interface WaitOptions {
   timeoutMs?: number;
   /** 이미지가 보이는 컨테이너 (기본 .image-gen-main) */
   container?: HTMLElement | Document;
   /** 이전에 본 이미지 src 집합 - 새로 등장한 것만 받아내려고 */
   knownSrcs?: Set<string>;
+  /**
+   * 새 이미지가 처음 감지된 뒤, 같은 생성 요청의 나머지 그리드 이미지(NAI는 한 번에
+   * 최대 4장까지 동시 생성 가능)가 마저 로드될 시간을 얼마나 더 기다릴지.
+   */
+  settleMs?: number;
 }
 
-export function waitForNewImage(
+/**
+ * NAI는 Generate 한 번으로 1~4장을 그리드로 한꺼번에 만들 수 있다. 첫 번째 새 이미지가
+ * 뜨는 순간 바로 resolve하면 나머지 그리드 셀은 아직 로딩 중이라 놓치므로, 첫 감지 후
+ * `settleMs`만큼 더 기다렸다가 그 시점까지 새로 나타난 이미지를 전부 모아서 반환한다.
+ * knownSrcs로 "새 것"만 걸러내므로 히스토리 패널이 같은 클래스를 재사용해도 안전하다.
+ */
+export function waitForNewImages(
   selector: string,
   options: WaitOptions = {},
-): Promise<HTMLImageElement> {
+): Promise<HTMLImageElement[]> {
   const {
     timeoutMs = 60_000,
     container = document,
     knownSrcs = new Set<string>(),
+    settleMs = 700,
   } = options;
   return new Promise((resolve, reject) => {
     let settled = false;
+    let settleTimer: number | undefined;
     const obs = new MutationObserver(() => check());
     let pollTimer: number | undefined;
 
-    function done(img: HTMLImageElement) {
+    function collectReady(): HTMLImageElement[] {
+      const seen = new Set<string>();
+      return Array.from(container.querySelectorAll<HTMLImageElement>(selector)).filter((img) => {
+        if (!img.src || knownSrcs.has(img.src) || seen.has(img.src)) return false;
+        if (!(img.complete && img.naturalWidth >= 256)) return false;
+        seen.add(img.src);
+        return true;
+      });
+    }
+
+    function finish() {
       if (settled) return;
       settled = true;
       obs.disconnect();
       clearTimeout(timer);
       if (pollTimer) clearInterval(pollTimer);
-      resolve(img);
+      resolve(collectReady());
     }
 
     function fail(err: Error) {
@@ -59,24 +82,15 @@ export function waitForNewImage(
       settled = true;
       obs.disconnect();
       if (pollTimer) clearInterval(pollTimer);
+      if (settleTimer) clearTimeout(settleTimer);
       reject(err);
     }
 
     function check(): void {
-      if (settled) return;
-      const imgs = Array.from(container.querySelectorAll<HTMLImageElement>(selector));
-      for (const img of imgs) {
-        if (!img.src || knownSrcs.has(img.src)) continue;
-        // src는 새 것이지만 아직 로딩 중일 수 있음 → load 이벤트로 대기
-        if (img.complete && img.naturalWidth >= 256) {
-          done(img);
-          return;
-        }
-        const onload = () => {
-          img.removeEventListener('load', onload);
-          if (img.naturalWidth >= 256) done(img);
-        };
-        img.addEventListener('load', onload);
+      if (settled || settleTimer !== undefined) return;
+      if (collectReady().length > 0) {
+        // 그리드의 나머지 셀도 마저 로드되도록 여기서 바로 resolve하지 않고 잠깐 더 기다린다
+        settleTimer = window.setTimeout(finish, settleMs);
       }
     }
 

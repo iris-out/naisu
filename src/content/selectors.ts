@@ -31,7 +31,6 @@ export const SEL = {
   // 결과 이미지
   resultImage: '.image-gen-main img.image-grid-image',
   displayGridBottom: '.display-grid-bottom',
-  displayGridImages: '.display-grid-images',
 
   // react-select
   modelSelect: 'input[aria-label="Select the Model"]',
@@ -118,6 +117,46 @@ export function findMainImage(): HTMLImageElement | null {
   return candidates.reduce((best, cur) =>
     cur.offsetWidth * cur.offsetHeight > best.offsetWidth * best.offsetHeight ? cur : best,
   );
+}
+
+/**
+ * History 사이드바 카드도 메인 그리드와 같은 `img.image-grid-image` 컴포넌트를 재사용해서
+ * 섞여 들어올 수 있다(2026-08-21 실측: `.display-grid-images`도 `.image-gen-output-region`도
+ * 컨테이너 클래스로는 못 걸러냈음 — 매칭 6장 = 메인 그리드 4 + History 카드 2). 컨테이너
+ * 클래스 대신 **렌더링 크기**로 구분한다 — 메인 캔버스의 그리드 타일은 크게 표시되고
+ * History 카드 썸네일은 훨씬 작게 표시되므로(스크린샷 실측 기준 면적 비율 10배 이상 차이),
+ * 가장 큰 이미지 대비 절반 미만인 것들을 히스토리 썸네일로 간주해 제외한다. 이 방식은 NAI가
+ * 클래스명/DOM 구조를 바꿔도(둘 다 이미 한 번씩 배신했다) "메인이 훨씬 크게 보인다"는 UI
+ * 관례 자체는 잘 안 바뀔 거라는 가정에 기댄다.
+ */
+function filterToLargestCluster(imgs: HTMLImageElement[]): HTMLImageElement[] {
+  if (imgs.length === 0) return imgs;
+  const rects = imgs.map((img) => img.getBoundingClientRect());
+  const maxArea = Math.max(...rects.map((r) => r.width * r.height));
+  return imgs.filter((_, i) => rects[i].width * rects[i].height >= maxArea * 0.5);
+}
+
+/** 방금 생성된 그리드의 이미지 전체(NAI가 Generate 한 번에 만들 수 있는 최대치까지). */
+export function findGridImages(): HTMLImageElement[] {
+  const seen = new Set<string>();
+  const candidates = Array.from(document.querySelectorAll<HTMLImageElement>(SEL.resultImage)).filter((img) => {
+    if (!img.src.startsWith('blob:') || seen.has(img.src) || img.offsetParent === null) return false;
+    if (!(img.complete && img.naturalWidth >= 256)) return false;
+    seen.add(img.src);
+    return true;
+  });
+  return filterToLargestCluster(candidates);
+}
+
+/**
+ * 새로 나타난 이미지 목록에서 메인 그리드에 속하지 않는 것(History 사이드바에 새로 생긴
+ * 카드 등)을 걸러낸다. 자동 배치 러너가 `waitForNewImages()`로 모은 "새 이미지들" 중에는
+ * 방금 생성한 결과가 History에도 새 카드로 추가되며 새 blob src를 얻는 경우가 섞여
+ * 들어올 수 있어서(=knownSrcs diff만으론 못 거름), `findGridImages()`와 같은 크기 기반
+ * 휴리스틱을 재사용한다.
+ */
+export function filterMainGridImages(imgs: HTMLImageElement[]): HTMLImageElement[] {
+  return filterToLargestCluster(imgs);
 }
 
 function hitTestMainImage(): HTMLImageElement | null {

@@ -4,8 +4,8 @@
  * - Anlas 하한 / 에러 토스트 / 타임아웃 / 일시정지·중단 안전장치
  */
 
-import { SEL, pickVisible, findGenerateButton, readAnlas, findSeedButton } from './selectors';
-import { pmSetText, blobUrlToBytes, bytesToBase64, waitForNewImage, ensureRandomSeed } from './dom-helpers';
+import { SEL, pickVisible, findGenerateButton, readAnlas, findSeedButton, filterMainGridImages } from './selectors';
+import { pmSetText, blobUrlToBytes, bytesToBase64, waitForNewImages, ensureRandomSeed } from './dom-helpers';
 import { getToast } from './overlay';
 import { getSettings, getTemplate, renderFilename, type Settings } from '../lib/storage';
 import { expand, totalCount } from '../lib/prompt-variator';
@@ -62,26 +62,31 @@ function snapshotKnownImageSrcs(): Set<string> {
   return set;
 }
 
+interface StripStatus { mode: string; level: 'good' | 'info' | 'bad'; message: string }
+
 async function downloadGenerated(
   img: HTMLImageElement,
   settings: Settings,
   batchName: string,
   idx: number,
-): Promise<{ saved: number; meta: ReturnType<typeof summarize>; error?: string }> {
+  /** NAI가 한 번에 여러 장(최대 4장)을 그리드로 생성했을 때, 파일명 충돌을 피하려고 붙이는 접미사(예: "_g2") */
+  gridSuffix = '',
+): Promise<{ saved: number; meta: ReturnType<typeof summarize>; error?: string; stripStatus?: StripStatus }> {
   const bytes = await blobUrlToBytes(img.src);
   const meta = parseNaiWebP(bytes);
   const s = summarize(meta);
-  const filename = renderFilename(settings.filenameTemplate, {
-    seed: s.seed,
-    model: s.model,
-    w: s.width,
-    h: s.height,
-    steps: s.steps,
-    sampler: s.sampler,
-    batch: batchName,
-    idx: idx + 1,
-  });
-  interface DownloadResp { saved?: string[]; errors?: string[]; error?: string }
+  const filename =
+    renderFilename(settings.filenameTemplate, {
+      seed: s.seed,
+      model: s.model,
+      w: s.width,
+      h: s.height,
+      steps: s.steps,
+      sampler: s.sampler,
+      batch: batchName,
+      idx: idx + 1,
+    }) + gridSuffix;
+  interface DownloadResp { saved?: string[]; errors?: string[]; error?: string; stripStatus?: StripStatus }
   let resp: DownloadResp | undefined;
   try {
     resp = await chrome.runtime.sendMessage({
@@ -97,11 +102,11 @@ async function downloadGenerated(
   } catch (e) {
     return { saved: 0, meta: s, error: `다운로드 요청 실패: ${e}` };
   }
-  if (resp?.error) return { saved: 0, meta: s, error: String(resp.error) };
+  if (resp?.error) return { saved: 0, meta: s, error: String(resp.error), stripStatus: resp.stripStatus };
   if (resp?.errors?.length) {
-    return { saved: resp.saved?.length ?? 0, meta: s, error: resp.errors.join('; ') };
+    return { saved: resp.saved?.length ?? 0, meta: s, error: resp.errors.join('; '), stripStatus: resp.stripStatus };
   }
-  return { saved: Array.isArray(resp?.saved) ? resp.saved.length : 0, meta: s };
+  return { saved: Array.isArray(resp?.saved) ? resp.saved.length : 0, meta: s, stripStatus: resp?.stripStatus };
 }
 
 export async function runBatch(maxItems?: number): Promise<void> {
@@ -194,16 +199,31 @@ export async function runBatch(maxItems?: number): Promise<void> {
         const errEl = document.querySelector(SEL.errorToast);
         if (errEl) throw new Error(`NAI 오류: ${errEl.textContent?.trim() ?? '알 수 없는 오류'}`);
         toast.setStatus(`생성 #${item.idx + 1}`);
-        const img = await waitForNewImage(SEL.resultImage, {
-          timeoutMs: settings.timeoutMs,
-          knownSrcs: known,
-        });
-        const { meta, error } = await downloadGenerated(img, settings, batchName, item.idx);
-        if (error) {
-          toast.log(`저장 실패 — ${error}`, 'bad');
-        } else {
-          toast.log(`저장 완료 #${item.idx + 1}${meta.seed ? ` · seed ${meta.seed}` : ''}`, 'good');
+        // NAI는 Generate 한 번으로 1~4장을 그리드로 동시 생성할 수 있음 — 새로 나타난 이미지 전부 수집
+        // (History 사이드바에 새로 생긴 카드가 섞여 들어올 수 있어 크기 기반으로 한 번 더 거름)
+        const imgs = filterMainGridImages(
+          await waitForNewImages(SEL.resultImage, { timeoutMs: settings.timeoutMs, knownSrcs: known }),
+        );
+        if (imgs.length === 0) throw new Error('생성된 이미지를 찾지 못했습니다');
+        const isGrid = imgs.length > 1;
+        if (isGrid) toast.log(`그리드 ${imgs.length}장 감지됨 — 전부 저장합니다`, 'info');
+
+        const results: Array<Awaited<ReturnType<typeof downloadGenerated>>> = [];
+        for (let g = 0; g < imgs.length; g++) {
+          const r = await downloadGenerated(imgs[g], settings, batchName, item.idx, isGrid ? `_g${g + 1}` : '');
+          results.push(r);
+          const label = isGrid ? `#${item.idx + 1}-${g + 1}/${imgs.length}` : `#${item.idx + 1}`;
+          if (r.error) {
+            toast.log(`저장 실패 ${label} — ${r.error}`, 'bad');
+          } else {
+            toast.log(`저장 완료 ${label}${r.meta.seed ? ` · seed ${r.meta.seed}` : ''}`, 'good');
+          }
+          if (r.stripStatus) {
+            toast.log(r.stripStatus.message, r.stripStatus.level);
+            if (r.stripStatus.level === 'bad') toast.alert(r.stripStatus.message);
+          }
         }
+        const meta = results[0]?.meta;
 
         retryStreak = 0;
         done++;

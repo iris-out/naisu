@@ -19,6 +19,8 @@ export interface ToastApi {
   hide(): void;
   setProgress(done: number, total: number, etaSec?: number): void;
   log(line: string, kind?: 'info' | 'good' | 'bad'): void;
+  /** 로그 줄과 별개로, 놓치면 안 되는 메시지를 화면 상단에 배너로 띄운다 (스트리핑 실패 등). */
+  alert(message: string, kind?: 'bad' | 'info'): void;
   setStatus(status: string): void;
   onPause(handler: () => void): void;
   onStop(handler: () => void): void;
@@ -33,6 +35,7 @@ let panel: HTMLElement | null = null;
 
 interface PanelEls {
   root: HTMLElement;
+  alerts: HTMLElement;
   card: HTMLElement;
   toggle: HTMLButtonElement;
   body: HTMLElement;
@@ -78,6 +81,7 @@ export function mountPanel(forceTopLeft = false): void {
   const root = document.createElement('div');
   root.id = ROOT_ID;
   root.innerHTML = `
+    <div class="naisu-alerts"></div>
     <div class="naisu-panel">
       <div class="np-h">
         <div class="brand">NAISU</div>
@@ -110,6 +114,7 @@ export function mountPanel(forceTopLeft = false): void {
 
   els = {
     root,
+    alerts: $('.naisu-alerts'),
     card: $('.naisu-panel'),
     toggle: $('.toggle') as HTMLButtonElement,
     body: $('.np-b'),
@@ -216,6 +221,7 @@ export function mountPanel(forceTopLeft = false): void {
         }
       });
     },
+    alert: (message, kind = 'bad') => showAlertBanner(message, kind),
     setStatus: (s) => {
       els!.progMini.textContent = s;
       const running = s === '실행 중' || s.startsWith('생성 ');
@@ -262,6 +268,23 @@ function pad(n: number): string {
 
 function escapeHtml(s: string): string {
   return s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!));
+}
+
+const ALERT_AUTOHIDE_MS: Record<'bad' | 'info', number> = { bad: 15_000, info: 8_000 };
+const ALERT_MAX_STACK = 4;
+
+/** 로그 스크롤에 묻히면 안 되는 실패/경고를 화면 상단에 배너로 띄운다 (스트리핑 실패 등). */
+function showAlertBanner(message: string, kind: 'bad' | 'info' = 'bad'): void {
+  if (!els) return;
+  const box = document.createElement('div');
+  box.className = `naisu-alert ${kind}`;
+  box.innerHTML = `<span class="msg"></span><button class="close" title="닫기" aria-label="닫기">✕</button>`;
+  box.querySelector('.msg')!.textContent = message; // XSS 방지 — 항상 textContent로 주입
+  const close = () => box.remove();
+  box.querySelector('.close')!.addEventListener('click', close);
+  els.alerts.appendChild(box);
+  while (els.alerts.childElementCount > ALERT_MAX_STACK) els.alerts.firstElementChild?.remove();
+  setTimeout(close, ALERT_AUTOHIDE_MS[kind]);
 }
 
 function startWatchers(): void {

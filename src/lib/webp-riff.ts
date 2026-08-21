@@ -58,6 +58,12 @@ export interface WebPInfo {
   chunks: WebPChunk[];
   /** VP8X flags 바이트 (없으면 undefined) */
   vp8xFlags?: number;
+  /**
+   * true면 어느 청크의 size 필드가 버퍼 범위를 벗어나 파싱이 중간에 멈췄다는 뜻.
+   * 이 경우 `chunks`에는 그 뒤에 있었을 수도 있는 청크(EXIF 포함)가 아예 안 잡혀 있으므로,
+   * "메타데이터 청크가 없었다"와 "파싱이 거기서 끊겼다"를 반드시 구분해서 다뤄야 한다.
+   */
+  truncated: boolean;
   /** 청크별 빠른 조회 */
   getChunk(fourcc: string): WebPChunk | undefined;
 }
@@ -67,6 +73,7 @@ export function parseWebP(buf: Uint8Array): WebPInfo {
   const result: WebPInfo = {
     isWebP: false,
     chunks,
+    truncated: false,
     getChunk(fourcc) {
       return chunks.find((c) => c.fourcc === fourcc);
     },
@@ -81,7 +88,14 @@ export function parseWebP(buf: Uint8Array): WebPInfo {
   while (off + 8 <= buf.length) {
     const fourcc = TEXT.decode(buf.subarray(off, off + 4));
     const size = view.getUint32(off + 4, true);
-    if (off + 8 + size > buf.length) break;
+    if (off + 8 + size > buf.length) {
+      // 헤더는 읽었는데 선언된 payload 크기가 버퍼 끝을 넘어감 — 정상 EOF가 아니라 손상/절단.
+      result.truncated = true;
+      console.warn(
+        `[naisu] WebP 파싱 중단: chunk "${fourcc}"가 선언한 크기(${size})가 남은 버퍼(${buf.length - off - 8})보다 큼 — 이후 청크는 무시됨`,
+      );
+      break;
+    }
     const payloadOffset = off + 8;
     chunks.push({ fourcc, payloadOffset, size });
     if (fourcc === FOURCC.VP8X && size >= 1) {

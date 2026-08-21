@@ -123,6 +123,30 @@
   display:flex;align-items:center;justify-content:center;
 }
 
+/* 놓치면 안 되는 실패/경고 배너 — 화면 상단 중앙, 패널과 별개로 항상 보임 */
+.naisu-alerts{
+  position:fixed;top:16px;left:50%;transform:translateX(-50%);
+  display:flex;flex-direction:column;gap:6px;
+  width:min(420px,calc(100vw - 32px));
+  z-index:2147483647;
+}
+.naisu-alert{
+  background:var(--naisu-bg);border:2px solid var(--naisu-r);box-shadow:3px 3px 0 var(--naisu-r);
+  padding:9px 10px;font-size:13px;line-height:1.5;
+  display:flex;gap:8px;align-items:flex-start;
+  animation:naisuAlertIn 180ms cubic-bezier(.2,.8,.2,1);
+}
+.naisu-alert.info{border-color:var(--naisu-fg);box-shadow:3px 3px 0 var(--naisu-fg)}
+.naisu-alert .msg{flex:1;white-space:pre-wrap;word-break:break-word}
+.naisu-alert .close{
+  flex:none;background:transparent;border:1px solid currentColor;color:inherit;
+  width:20px;height:20px;line-height:1;font-size:11px;cursor:pointer;
+}
+.naisu-alert .close:hover{background:currentColor}
+.naisu-alert.bad .close:hover{color:var(--naisu-bg)}
+@keyframes naisuAlertIn{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:translateY(0)}}
+@media (prefers-reduced-motion:reduce){.naisu-alert{animation-duration:.01ms}}
+
 .np-log{
   background:#fff;border:1px solid var(--naisu-soft);padding:6px 8px;margin-top:7px;
   font-size:12px;line-height:1.55;color:var(--naisu-mid);

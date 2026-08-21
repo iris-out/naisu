@@ -8,7 +8,7 @@
 import './overlay.css';
 import { mountPanel, unmountPanel, getToast } from './overlay';
 import { runBatch, stopBatch, pauseBatch, isRunning } from './runner';
-import { readAnlas, findMainImage, SEL } from './selectors';
+import { readAnlas, findMainImage, findGridImages, SEL } from './selectors';
 import { blobUrlToBytes, bytesToBase64 } from './dom-helpers';
 import { getSettings, renderFilename } from '../lib/storage';
 import { parseNaiWebP, summarize } from '../lib/nai-metadata';
@@ -26,35 +26,52 @@ function wireHandlers(): void {
 }
 
 // 수동 저장 버튼 → 현재 화면의 결과 이미지를 즉시 다운로드
+// NAI는 Generate 한 번으로 1~4장을 그리드로 동시 생성할 수 있어서, 그리드 컨테이너를
+// 찾을 수 있으면 그 안의 이미지를 전부 저장하고 — 못 찾으면(셀렉터 변경 등) 기존처럼
+// 화면 중앙에 표시된 이미지 한 장만 저장하는 폴백으로 떨어진다.
 async function manualDownload(): Promise<void> {
   const toast = getToast();
-  const img = findMainImage();
-  if (!img) {
+  const grid = findGridImages();
+  const main = findMainImage();
+  const imgs = grid.length > 0 ? grid : main ? [main] : [];
+  if (imgs.length === 0) {
     toast.log('저장할 이미지 없음 — 먼저 NAI에서 이미지를 생성하세요', 'bad');
     return;
   }
-  try {
-    const settings = await getSettings();
-    const bytes = await blobUrlToBytes(img.src);
-    const meta = parseNaiWebP(bytes);
-    const s = summarize(meta);
-    const filename = renderFilename(settings.filenameTemplate, {
-      seed: s.seed, model: s.model, w: s.width, h: s.height, steps: s.steps, sampler: s.sampler,
-    });
-    const resp = await chrome.runtime.sendMessage({
-      type: 'naisu.download',
-      payload: {
-        bytes: bytesToBase64(bytes),
-        mode: settings.downloadMode,
-        folder: settings.downloadFolder,
-        filename,
-        strip: { keepIccp: settings.keepColorProfile },
-      },
-    });
-    if (resp?.error) toast.log(`저장 실패 — ${resp.error}`, 'bad');
-    else toast.log(`저장됨 · ${resp?.saved?.length ?? 0}개`, 'good');
-  } catch (e) {
-    toast.log(`저장 실패 — ${e instanceof Error ? e.message : String(e)}`, 'bad');
+  const isGrid = imgs.length > 1;
+  if (isGrid) toast.log(`그리드 ${imgs.length}장 감지됨 — 전부 저장합니다`, 'info');
+
+  const settings = await getSettings();
+  for (let g = 0; g < imgs.length; g++) {
+    const img = imgs[g];
+    const label = isGrid ? `${g + 1}/${imgs.length}` : '';
+    try {
+      const bytes = await blobUrlToBytes(img.src);
+      const meta = parseNaiWebP(bytes);
+      const s = summarize(meta);
+      const filename =
+        renderFilename(settings.filenameTemplate, {
+          seed: s.seed, model: s.model, w: s.width, h: s.height, steps: s.steps, sampler: s.sampler,
+        }) + (isGrid ? `_g${g + 1}` : '');
+      const resp = await chrome.runtime.sendMessage({
+        type: 'naisu.download',
+        payload: {
+          bytes: bytesToBase64(bytes),
+          mode: settings.downloadMode,
+          folder: settings.downloadFolder,
+          filename,
+          strip: { keepIccp: settings.keepColorProfile },
+        },
+      });
+      if (resp?.error) toast.log(`저장 실패 ${label} — ${resp.error}`, 'bad');
+      else toast.log(`저장됨 ${label} · ${resp?.saved?.length ?? 0}개`, 'good');
+      if (resp?.stripStatus) {
+        toast.log(resp.stripStatus.message, resp.stripStatus.level);
+        if (resp.stripStatus.level === 'bad') toast.alert(resp.stripStatus.message);
+      }
+    } catch (e) {
+      toast.log(`저장 실패 ${label} — ${e instanceof Error ? e.message : String(e)}`, 'bad');
+    }
   }
 }
 

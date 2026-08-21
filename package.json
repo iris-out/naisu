@@ -1,6 +1,6 @@
 {
   "name": "naisu",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "private": true,
   "description": "NovelAI image extension — metadata viewer/stripper, batch runner",
   "type": "module",
