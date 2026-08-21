@@ -194,6 +194,10 @@ export function mountPanel(forceTopLeft = false): void {
       els!.progMini.textContent = `${done}/${total} · ${pct}%${etaTxt}`;
     },
     log: (line, kind = 'info') => {
+      // 패널 로그와 별개로 항상 페이지 콘솔(F12)에도 남긴다 — SW 콘솔(chrome://extensions
+      // → service worker)은 따로 열어야 보이는 별개 컨텍스트라, 일반 사용자가 캡처해서
+      // 보내주기 쉬운 쪽은 이 페이지 콘솔이다.
+      (kind === 'bad' ? console.error : kind === 'good' ? console.log : console.info)(`[naisu] ${line}`);
       const div = document.createElement('div');
       const t = new Date();
       const ts = `${pad(t.getHours())}:${pad(t.getMinutes())}:${pad(t.getSeconds())}`;

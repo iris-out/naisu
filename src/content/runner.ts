@@ -62,7 +62,7 @@ function snapshotKnownImageSrcs(): Set<string> {
   return set;
 }
 
-interface StripStatus { mode: string; level: 'good' | 'info' | 'bad'; message: string }
+interface StripStatus { mode: string; level: 'good' | 'info' | 'bad'; message: string; detail?: string }
 
 async function downloadGenerated(
   img: HTMLImageElement,
@@ -220,6 +220,7 @@ export async function runBatch(maxItems?: number): Promise<void> {
           }
           if (r.stripStatus) {
             toast.log(r.stripStatus.message, r.stripStatus.level);
+            if (r.stripStatus.detail) console.error('[naisu] stripStatus 상세:', r.stripStatus.detail);
             if (r.stripStatus.level === 'bad') toast.alert(r.stripStatus.message);
           }
         }

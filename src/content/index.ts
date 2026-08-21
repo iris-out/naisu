@@ -67,6 +67,7 @@ async function manualDownload(): Promise<void> {
       else toast.log(`저장됨 ${label} · ${resp?.saved?.length ?? 0}개`, 'good');
       if (resp?.stripStatus) {
         toast.log(resp.stripStatus.message, resp.stripStatus.level);
+        if (resp.stripStatus.detail) console.error('[naisu] stripStatus 상세:', resp.stripStatus.detail);
         if (resp.stripStatus.level === 'bad') toast.alert(resp.stripStatus.message);
       }
     } catch (e) {

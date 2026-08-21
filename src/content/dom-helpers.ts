@@ -132,10 +132,25 @@ export async function ensureRandomSeed(seedBtn: HTMLButtonElement): Promise<bool
   return seedBtn.textContent?.trim() === 'N/A';
 }
 
-/** blob URL → Uint8Array */
+/**
+ * blob URL → Uint8Array. 하드클린/클린이 실패하는 원인 중 하나로 "애초에 유효한 이미지
+ * 바이트를 못 받아왔다"(blob URL이 이미 revoke됐거나 레이스)는 가능성이 있어서, 이
+ * 단계에서 실제로 뭘 받았는지 페이지 콘솔에 남긴다.
+ */
 export async function blobUrlToBytes(url: string): Promise<Uint8Array> {
-  const blob = await (await fetch(url)).blob();
-  return new Uint8Array(await blob.arrayBuffer());
+  let res: Response;
+  try {
+    res = await fetch(url);
+  } catch (e) {
+    console.error(`[naisu] blobUrlToBytes: fetch 자체가 실패함 url=${url}`, e);
+    throw e;
+  }
+  const blob = await res.blob();
+  const bytes = new Uint8Array(await blob.arrayBuffer());
+  console.log(
+    `[naisu] blobUrlToBytes: url=${url} fetchOk=${res.ok} status=${res.status} blobType="${blob.type}" blobSize=${blob.size} bytesLength=${bytes.length}`,
+  );
+  return bytes;
 }
 
 /** Uint8Array → base64 (service worker로 보낼 때 사용) */
