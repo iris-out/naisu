@@ -128,12 +128,25 @@ export function findMainImage(): HTMLImageElement | null {
  * 가장 큰 이미지 대비 절반 미만인 것들을 히스토리 썸네일로 간주해 제외한다. 이 방식은 NAI가
  * 클래스명/DOM 구조를 바꿔도(둘 다 이미 한 번씩 배신했다) "메인이 훨씬 크게 보인다"는 UI
  * 관례 자체는 잘 안 바뀔 거라는 가정에 기댄다.
+ *
+ * 2026-08-22 실측 추가 버그: `offsetParent !== null`은 `display:none`만 걸러낼 뿐 스크롤로
+ * 화면 밖에 나간 요소는 그대로 통과시킨다. 한 장씩 생성하는 사용자한테서 "이전에 뽑은
+ * 이미지까지 같이 다운로드된다"는 보고가 왔는데, 콘솔에서 직접 찍어보니 이전 생성 결과가
+ * 새 결과와 거의 같은 크기(면적비 96%)로 화면 밖에(`inViewport:false`) 여전히 남아있었다
+ * — 면적 기준만으로는 이 케이스를 못 걸러낸다. 그래서 **뷰포트 교차 여부**를 먼저 걸러낸
+ * 뒤에 크기 클러스터링을 적용한다.
  */
+function isInViewport(r: DOMRect): boolean {
+  return r.top < window.innerHeight && r.bottom > 0 && r.left < window.innerWidth && r.right > 0;
+}
+
 function filterToLargestCluster(imgs: HTMLImageElement[]): HTMLImageElement[] {
   if (imgs.length === 0) return imgs;
-  const rects = imgs.map((img) => img.getBoundingClientRect());
+  const onScreen = imgs.filter((img) => isInViewport(img.getBoundingClientRect()));
+  if (onScreen.length === 0) return [];
+  const rects = onScreen.map((img) => img.getBoundingClientRect());
   const maxArea = Math.max(...rects.map((r) => r.width * r.height));
-  return imgs.filter((_, i) => rects[i].width * rects[i].height >= maxArea * 0.5);
+  return onScreen.filter((_, i) => rects[i].width * rects[i].height >= maxArea * 0.5);
 }
 
 /** 방금 생성된 그리드의 이미지 전체(NAI가 Generate 한 번에 만들 수 있는 최대치까지). */
