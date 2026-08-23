@@ -2,13 +2,44 @@
  * NAI 페이지(React + ProseMirror + react-select) 조작 헬퍼.
  */
 
-/** ProseMirror에 텍스트 주입 (전체 치환) */
-export function pmSetText(el: HTMLElement, text: string): void {
+/**
+ * ProseMirror에 텍스트 주입 (전체 치환).
+ *
+ * ⚠ `document.execCommand`는 **지금 포커스된** 편집기에 쓴다. 대상에 포커스가 실제로
+ * 옮겨가지 않았는데(탭 뒤에 숨어 있거나 display:none) 그대로 실행하면 엉뚱한 편집기에
+ * 내용이 들어간다 — 2026-08-24 실측: 이력의 UC를 채우려다 **메인 프롬프트가 UC 내용으로
+ * 덮이는** 버그가 났다. 그래서 포커스가 실제로 갔는지, 쓰고 나서 내용이 반영됐는지
+ * 두 번 확인하고 실패를 호출자에게 돌려준다.
+ *
+ * @returns 실제로 주입에 성공했으면 true
+ */
+export function pmSetText(el: HTMLElement, text: string): boolean {
   el.focus();
-  // selectAll/delete 후 insertText — execCommand는 deprecated지만 PM이 여전히 처리
+  const active = document.activeElement;
+  if (active !== el && !el.contains(active)) {
+    console.warn(
+      '[naisu] pmSetText: 대상 편집기에 포커스가 가지 않아 입력을 건너뜁니다 ' +
+        '(숨겨진 탭일 수 있음). 엉뚱한 곳에 쓰지 않도록 중단합니다.',
+      el,
+    );
+    return false;
+  }
+
+  // selectAll/delete 후 insertText — execCommand는 deprecated지만 PM이 여전히 처리한다
   document.execCommand('selectAll');
   document.execCommand('delete');
   document.execCommand('insertText', false, text);
+
+  // 반영 확인 — PM이 입력을 거부했거나 다른 곳에 들어갔을 수 있다
+  const got = (el.textContent ?? '').trim();
+  const want = text.trim();
+  if (want && !got.startsWith(want.slice(0, Math.min(24, want.length)))) {
+    console.warn(
+      `[naisu] pmSetText: 입력 후 내용이 기대와 다릅니다 (기대 "${want.slice(0, 40)}…", 실제 "${got.slice(0, 40)}…")`,
+    );
+    return false;
+  }
+  return true;
 }
 
 /** React 제어형 input/number/text 에 값 주입 (네이티브 setter 우회) */
@@ -111,25 +142,78 @@ export function waitForNewImages(
 }
 
 /**
- * NAI 시드 필드를 N/A(자동 랜덤)로 만든다.
- * - 이미 N/A면 아무것도 안 함
- * - 숫자가 들어있으면 버튼 클릭 → 나타나는 input 비워서 blur
- * - 실패 시 false 반환 (사용자에게 안내 가능)
+ * 시드 무작위화 시도 결과.
+ *
+ * 예전에는 boolean이었고 판단 기준이 `textContent === 'N/A'` 하나뿐이었다. NAI가 시드
+ * 표시를 아이콘으로 바꾼 뒤로는 이미 랜덤 상태인데도 계속 false가 나왔고, 러너가 그걸
+ * 치명적 오류로 처리해서 **배치 전체가 0장으로 죽는** 버그가 됐다(2026-08-23 보고).
+ *
+ * 그래서 "확인 못 함"과 "고정 시드가 확실함"을 구분한다 — 전자는 경고 후 진행,
+ * 후자만 중단한다. 같은 이미지가 반복 생성되는 걸 막자는 원래 의도는 후자에서 지켜진다.
  */
-export async function ensureRandomSeed(seedBtn: HTMLButtonElement): Promise<boolean> {
-  if (seedBtn.textContent?.trim() === 'N/A') return true;
+export type SeedRandomizeResult =
+  /** 표시값에 숫자가 없음 = 이미 자동/랜덤 */
+  | 'already-random'
+  /** 고정 숫자였는데 지워서 랜덤으로 바꿨음 */
+  | 'randomized'
+  /** 지웠는데도 여전히 고정 숫자 — 그대로 두면 같은 이미지가 반복된다 */
+  | 'still-fixed'
+  /** 시드 UI 자체를 못 찾음 — 판단 불가 */
+  | 'unknown';
+
+/** 표시 문자열에 숫자가 하나도 없으면 고정 시드가 아니다(N/A, 빈 값, 아이콘 전용 등). */
+function looksRandom(text: string | null | undefined): boolean {
+  return !/\d/.test((text ?? '').trim());
+}
+
+/** 실패 원인을 추적할 수 있게 시드 영역 주변 DOM을 요약해 남긴다. */
+function describeSeedArea(seedBtn: HTMLButtonElement): string {
+  const parent = seedBtn.parentElement;
+  return [
+    `button.text="${seedBtn.textContent?.trim() ?? ''}"`,
+    `button.aria-label="${seedBtn.getAttribute('aria-label') ?? ''}"`,
+    `button.title="${seedBtn.title}"`,
+    `button.outerHTML=${seedBtn.outerHTML.slice(0, 300)}`,
+    `parent.text="${parent?.textContent?.trim().slice(0, 120) ?? ''}"`,
+  ].join(' | ');
+}
+
+/**
+ * NAI 시드 필드를 자동(랜덤)으로 만든다.
+ * - 표시값에 숫자가 없으면 이미 랜덤이므로 아무것도 하지 않는다
+ * - 고정 숫자면 버튼을 눌러 나타나는 input을 비우고 blur
+ */
+export async function ensureRandomSeed(seedBtn: HTMLButtonElement): Promise<SeedRandomizeResult> {
+  const before = seedBtn.textContent;
+  if (looksRandom(before)) return 'already-random';
+
   seedBtn.click();
   await new Promise((r) => setTimeout(r, 80));
-  // 방금 열린 input 찾기 (focus 우선, fallback으로 number input)
+  const active = document.activeElement as HTMLElement | null;
   const inp =
-    (document.activeElement as HTMLInputElement | null) ??
-    document.querySelector<HTMLInputElement>('input[type="number"]:not([readonly]), input[type="text"]:not([readonly])');
-  if (!inp || (inp.tagName !== 'INPUT')) return false;
+    active instanceof HTMLInputElement
+      ? active
+      : document.querySelector<HTMLInputElement>(
+          'input[type="number"]:not([readonly]), input[type="text"]:not([readonly])',
+        );
+  if (!inp) {
+    console.warn(
+      `[naisu] ensureRandomSeed: 시드 입력란을 찾지 못했습니다 — ${describeSeedArea(seedBtn)}`,
+    );
+    return 'unknown';
+  }
+
   setReactInputValue(inp, '');
   inp.blur();
-  // 변경이 적용되도록 잠깐 대기
   await new Promise((r) => setTimeout(r, 80));
-  return seedBtn.textContent?.trim() === 'N/A';
+
+  const after = seedBtn.textContent;
+  if (looksRandom(after)) return 'randomized';
+
+  console.warn(
+    `[naisu] ensureRandomSeed: 지운 뒤에도 시드가 고정으로 보입니다 (before="${before?.trim()}" after="${after?.trim()}") — ${describeSeedArea(seedBtn)}`,
+  );
+  return 'still-fixed';
 }
 
 /**

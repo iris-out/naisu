@@ -8,33 +8,32 @@
  */
 
 import { stripMetadata, parseWebP } from '../lib/webp-riff';
+import { getSettings } from '../lib/storage';
 import type { DownloadMode } from '../lib/storage';
+import { sendToTab } from '../lib/messages';
+import type {
+  DownloadPayload,
+  DownloadResponse,
+  NaisuMessage,
+  NotifyPayload,
+  OkResponse,
+  StripFilesPayload,
+  StripFilesResponse,
+  StripStatusReport,
+  WebhookPayload,
+  WebhookResponse,
+} from '../lib/messages';
 
+/** 메시지 타입은 lib/messages.ts에 단일 정의 — 여기서는 페이로드만 꺼내 쓴다. */
 interface DownloadReq {
   type: 'naisu.download';
-  payload: {
-    bytes: string; // base64
-    mode: DownloadMode;
-    folder: string;
-    filename: string;
-    strip: { keepIccp: boolean };
-  };
+  payload: DownloadPayload;
 }
 
 interface WebhookReq {
   type: 'naisu.webhook';
-  payload: {
-    url: string;
-    body: unknown;
-  };
+  payload: WebhookPayload;
 }
-
-interface BadgeReq {
-  type: 'naisu.badge';
-  payload: { text: string; color?: string };
-}
-
-type Req = DownloadReq | WebhookReq | BadgeReq;
 
 function b64ToBytes(b64: string): Uint8Array {
   const bin = atob(b64);
@@ -110,10 +109,13 @@ async function stripStealthAlpha(bytes: Uint8Array): Promise<StripResult> {
     return { data: bytes, status: 'not-webp', detail };
   }
   let stage = 'createImageBitmap';
+  // catch에서도 참조할 수 있게 try 밖에 선언 — 어느 단계까지 진행됐었는지 실패 로그에 남기기 위함(0=아직 못 얻음)
+  let width = 0;
+  let height = 0;
   try {
     console.log(`[naisu] stripStealthAlpha 시작: 입력 ${bytes.length}B`);
     const bitmap = await createImageBitmap(new Blob([bytes.slice()], { type: 'image/webp' }));
-    const { width, height } = bitmap;
+    ({ width, height } = bitmap);
     console.log(`[naisu] stripStealthAlpha: ${stage} 완료 — ${width}x${height}`);
 
     stage = 'drawImage/getImageData';
@@ -161,7 +163,13 @@ async function stripStealthAlpha(bytes: Uint8Array): Promise<StripResult> {
     console.log(`[naisu] stripStealthAlpha 완료: 출력 ${out.length}B (blob.type=${blob.type})`);
     return { data: out, status: 'ok' };
   } catch (e) {
-    const detail = `실패 단계=${stage} | ${describeError(e)} | env: ${envFingerprint()} | 입력 ${bytes.length}B`;
+    const detail = [
+      `실패 단계=${stage}`,
+      `이미지 크기=${width > 0 ? `${width}x${height}` : 'n/a(디코드 전 실패)'}`,
+      `입력 ${bytes.length}B`,
+      describeError(e),
+      `env: ${envFingerprint()}`,
+    ].join(' | ');
     console.error('[naisu] stripStealthAlpha 실패 — 원본을 그대로 반환합니다.', detail, e);
     return { data: bytes, status: 'error', error: e instanceof Error ? e.message : String(e), detail };
   }
@@ -196,10 +204,12 @@ async function hardCleanReencode(bytes: Uint8Array): Promise<StripResult> {
     return { data: bytes, status: 'not-webp', detail };
   }
   let stage = 'createImageBitmap';
+  let width = 0;
+  let height = 0;
   try {
     console.log(`[naisu] hardCleanReencode 시작: 입력 ${bytes.length}B`);
     const bitmap = await createImageBitmap(new Blob([bytes.slice()], { type: 'image/webp' }));
-    const { width, height } = bitmap;
+    ({ width, height } = bitmap);
     console.log(`[naisu] hardCleanReencode: ${stage} 완료 — ${width}x${height}`);
 
     stage = 'drawImage';
@@ -217,18 +227,17 @@ async function hardCleanReencode(bytes: Uint8Array): Promise<StripResult> {
     console.log(`[naisu] hardCleanReencode 완료: 출력 ${out.length}B (blob.type=${blob.type})`);
     return { data: out, status: 'ok' };
   } catch (e) {
-    const detail = `실패 단계=${stage} | ${describeError(e)} | env: ${envFingerprint()} | 입력 ${bytes.length}B`;
+    const detail = [
+      `실패 단계=${stage}`,
+      `이미지 크기=${width > 0 ? `${width}x${height}` : 'n/a(디코드 전 실패)'}`,
+      `JPEG quality=${HARDCLEAN_JPEG_QUALITY}`,
+      `입력 ${bytes.length}B`,
+      describeError(e),
+      `env: ${envFingerprint()}`,
+    ].join(' | ');
     console.error('[naisu] hardCleanReencode 실패 — 원본을 그대로 반환합니다.', detail, e);
     return { data: bytes, status: 'error', error: e instanceof Error ? e.message : String(e), detail };
   }
-}
-
-interface StripStatusReport {
-  mode: DownloadMode;
-  level: 'good' | 'info' | 'bad';
-  message: string;
-  /** 배너/로그에는 안 보이는 상세 진단 — content script가 콘솔에만 찍는다. */
-  detail?: string;
 }
 
 /** StripResult → 사용자에게 보여줄 한 줄 메시지 + 로그 심각도(+ 콘솔 전용 상세). */
@@ -269,30 +278,37 @@ function describeStripStatus(mode: DownloadMode, hadExifBefore: boolean, result:
   }
 }
 
-interface DownloadResult {
+interface StripAndSaveResult {
   saved: string[];
-  errors?: string[];
-  /** 클린/하드클린 스트리핑이 실제로 어떻게 됐는지 — content script가 UI 로그·알림에 그대로 사용 */
+  errors: string[];
   stripStatus?: StripStatusReport;
 }
 
-async function handleDownload(req: DownloadReq): Promise<DownloadResult> {
-  const { bytes, mode, folder, filename, strip } = req.payload;
-  const raw = b64ToBytes(bytes);
-  console.log(
-    `[naisu] handleDownload 시작: mode=${mode} filename="${filename}" folder="${folder}" keepIccp=${strip.keepIccp} base64Length=${bytes.length} rawBytesLength=${raw.length}`,
-  );
-
+/**
+ * 바이트 배열 하나를 (모드에 따라 스트리핑 →) chrome.downloads.download로 저장하는 공유 파이프라인.
+ * handleDownload()(자동 배치/수동 저장, base64로 온 새 생성 이미지)와 handleStripFiles()
+ * (N09, 예전에 저장해 둔 파일을 일괄 클린)가 이 함수 하나를 공유한다 — 스트리핑 로직 자체는
+ * 절대 중복 구현하지 않는다. logLabel은 호출자별로 콘솔 로그를 구분하기 위한 접두어일 뿐,
+ * 파이프라인 동작 자체는 호출자와 무관하게 항상 동일하다.
+ */
+async function runStripAndSave(
+  raw: Uint8Array,
+  mode: DownloadMode,
+  folder: string,
+  filename: string,
+  keepIccp: boolean,
+  logLabel: string,
+): Promise<StripAndSaveResult> {
   // mode 별로 저장할 (data, suffix, 확장자/MIME) 작업 목록
   const MIME_BY_EXT = { webp: 'image/webp', jpg: 'image/jpeg' } as const;
   const tasks: Array<{ data: Uint8Array; suffix: string; ext: keyof typeof MIME_BY_EXT }> = [];
-  let stripStatus: DownloadResult['stripStatus'];
+  let stripStatus: StripStatusReport | undefined;
   if (mode === 'hardclean' || mode === 'clean' || mode === 'both') {
     const rawInfo = parseWebP(raw);
     console.log(
-      `[naisu] handleDownload: raw 청크=[${rawInfo.chunks.map((c) => c.fourcc).join(',')}] truncated=${rawInfo.truncated} vp8xFlags=${rawInfo.vp8xFlags?.toString(16) ?? 'n/a'}`,
+      `[naisu] ${logLabel}: raw 청크=[${rawInfo.chunks.map((c) => c.fourcc).join(',')}] truncated=${rawInfo.truncated} vp8xFlags=${rawInfo.vp8xFlags?.toString(16) ?? 'n/a'}`,
     );
-    const riffCleaned = stripMetadata(raw, strip);
+    const riffCleaned = stripMetadata(raw, { keepIccp });
     // '둘 다'는 하드클린이 아니라 항상 (기존)클린 + 원본 조합
     const result =
       mode === 'hardclean' ? await hardCleanReencode(riffCleaned) : await stripStealthAlpha(riffCleaned);
@@ -308,7 +324,16 @@ async function handleDownload(req: DownloadReq): Promise<DownloadResult> {
           detail: `raw 청크=[${rawInfo.chunks.map((c) => c.fourcc).join(',')}] rawBytesLength=${raw.length}`,
         }
       : describeStripStatus(mode, !!rawInfo.getChunk('EXIF'), result);
-    if (stripStatus.detail) console.warn('[naisu] handleDownload: stripStatus detail —', stripStatus.detail);
+    // 콘솔에 찍히는 detail 하나만 보고도 고칠 수 있게, strip 함수 내부 진단 앞에
+    // 이 요청 자체의 컨텍스트(어떤 모드/파일/원본이었는지)를 붙여서 완결된 문장으로 만든다.
+    if (stripStatus.detail) {
+      stripStatus.detail =
+        `요청: mode=${mode} filename="${filename}" folder="${folder}" keepIccp=${keepIccp} | ` +
+        `raw: ${raw.length}B, 청크=[${rawInfo.chunks.map((c) => c.fourcc).join(',')}], truncated=${rawInfo.truncated}, vp8xFlags=0x${rawInfo.vp8xFlags?.toString(16) ?? 'n/a'} | ` +
+        `riffCleaned: ${riffCleaned.length}B | ` +
+        stripStatus.detail;
+      console.warn(`[naisu] ${logLabel}: stripStatus detail —`, stripStatus.detail);
+    }
   }
   if (mode === 'raw' || mode === 'both') {
     tasks.push({ data: raw, suffix: mode === 'both' ? '_raw' : '', ext: 'webp' }); // both면 _raw 접미사
@@ -334,19 +359,100 @@ async function handleDownload(req: DownloadReq): Promise<DownloadResult> {
       if (typeof id === 'number') {
         saved.push(path);
       } else {
-        console.warn(`[naisu] handleDownload: chrome.downloads.download 거부됨 — ${path}`);
+        console.warn(`[naisu] ${logLabel}: chrome.downloads.download 거부됨 — ${path}`);
         errors.push(`다운로드 거부: ${path}`);
       }
     } catch (e) {
-      console.error(`[naisu] handleDownload: chrome.downloads.download 예외 — ${path}`, describeError(e));
+      console.error(`[naisu] ${logLabel}: chrome.downloads.download 예외 — ${path}`, describeError(e));
       errors.push(`${path}: ${e instanceof Error ? e.message : String(e)}`);
     }
   }
+  return { saved, errors, stripStatus };
+}
+
+async function handleDownload(req: DownloadReq): Promise<DownloadResponse> {
+  const { bytes, mode, folder, filename, strip } = req.payload;
+  const raw = b64ToBytes(bytes);
+  console.log(
+    `[naisu] handleDownload 시작: mode=${mode} filename="${filename}" folder="${folder}" keepIccp=${strip.keepIccp} base64Length=${bytes.length} rawBytesLength=${raw.length}`,
+  );
+  const { saved, errors, stripStatus } = await runStripAndSave(raw, mode, folder, filename, strip.keepIccp, 'handleDownload');
   console.log(`[naisu] handleDownload 종료: saved=${JSON.stringify(saved)} errors=${JSON.stringify(errors)}`);
   return errors.length ? { saved, errors, stripStatus } : { saved, stripStatus };
 }
 
-async function handleWebhook(req: WebhookReq): Promise<{ ok: boolean; status?: number }> {
+/**
+ * N09 — 예전에 원본으로 저장해 둔 파일들을 나중에 일괄로 하드클린/클린 처리.
+ * 스트리핑 파이프라인은 handleDownload()와 완전히 같은 runStripAndSave()를 그대로 재사용하고,
+ * 파일마다 순차 처리한다(Promise.all로 동시에 돌리면 base64 문자열 여러 개를 동시에
+ * 메모리에 붙들게 되어 대량 파일 처리 시 메모리 압박이 커진다).
+ */
+async function handleStripFiles(payload: StripFilesPayload): Promise<StripFilesResponse> {
+  console.log(
+    `[naisu] handleStripFiles 시작: files=${payload.files.length} mode=${payload.mode} folder="${payload.folder}" keepIccp=${payload.keepIccp}`,
+  );
+  const results: StripFilesResponse['results'] = [];
+  for (const file of payload.files) {
+    try {
+      const raw = b64ToBytes(file.bytes);
+      const { saved, errors, stripStatus } = await runStripAndSave(
+        raw,
+        payload.mode,
+        payload.folder,
+        file.name,
+        payload.keepIccp,
+        `handleStripFiles[${file.name}]`,
+      );
+      results.push({
+        name: file.name,
+        saved,
+        error: errors.length ? errors.join('; ') : undefined,
+        stripStatus,
+      });
+    } catch (e) {
+      // 파일 하나가 깨진 base64거나 예상치 못한 예외를 던져도 나머지 파일 처리를 막지 않는다 —
+      // 어느 파일이 왜 실패했는지가 항상 결과에 남아야 한다(실패를 삼키지 않는다).
+      console.error(`[naisu] handleStripFiles: "${file.name}" 처리 중 예외`, describeError(e));
+      results.push({ name: file.name, saved: [], error: e instanceof Error ? e.message : String(e) });
+    }
+  }
+  console.log(
+    `[naisu] handleStripFiles 종료: ${JSON.stringify(results.map((r) => ({ name: r.name, saved: r.saved.length, error: r.error })))}`,
+  );
+  return { results };
+}
+
+/**
+ * N03 — 배치 완료/실패 브라우저 알림. Discord 웹훅을 설정하지 않은 사용자를 위한 기본 통보 수단.
+ * 보내는 쪽(content script)에서도 설정을 확인하지만, 진입점이 늘어나도 설정이 항상 지켜지도록
+ * 여기서도 다시 한번 getSettings().notifications[kind]를 확인한다 — 꺼져 있으면 표시하지 않는다.
+ */
+async function handleNotify(payload: NotifyPayload): Promise<OkResponse> {
+  const settings = await getSettings();
+  if (!settings.notifications[payload.kind]) {
+    console.log(`[naisu] naisu.notify: kind=${payload.kind} 알림이 설정에서 꺼져 있어 표시하지 않음`);
+    return { ok: false, reason: `알림 종류(${payload.kind})가 설정에서 꺼져 있음` };
+  }
+  if (payload.kind === 'error') {
+    // 실패 알림은 배지 색도 빨강으로 — 브라우저 알림을 놓쳐도 툴바 아이콘만 보고 알 수 있게.
+    chrome.action.setBadgeBackgroundColor({ color: '#d91919' });
+  }
+  try {
+    chrome.notifications.create({
+      type: 'basic',
+      iconUrl: chrome.runtime.getURL('src/assets/icon-128.png'),
+      title: payload.title,
+      message: payload.message,
+    });
+    console.log(`[naisu] naisu.notify: kind=${payload.kind} title="${payload.title}" 표시함`);
+    return { ok: true };
+  } catch (e) {
+    console.error('[naisu] naisu.notify: chrome.notifications.create 실패', describeError(e));
+    return { ok: false, reason: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+async function handleWebhook(req: WebhookReq): Promise<WebhookResponse> {
   try {
     const r = await fetch(req.payload.url, {
       method: 'POST',
@@ -360,13 +466,36 @@ async function handleWebhook(req: WebhookReq): Promise<{ ok: boolean; status?: n
   }
 }
 
-chrome.runtime.onMessage.addListener((req: Req, _sender, sendResponse) => {
+/**
+ * 절전 방지. 'system' 수준이라 화면은 꺼져도 되고 시스템만 깨어 있게 한다 —
+ * 화면을 강제로 켜 두는 것보다 덜 침습적이면서, 절전으로 탭이 멈춰 배치가 끊기는 건 막는다.
+ * 배치가 끝나면 반드시 해제해야 하므로 실패해도 조용히 넘어가지 않고 상태를 돌려준다.
+ */
+function handlePower(on: boolean): OkResponse {
+  try {
+    if (on) chrome.power.requestKeepAwake('system');
+    else chrome.power.releaseKeepAwake();
+    console.log(`[naisu] 절전 방지 ${on ? '요청' : '해제'}`);
+    return { ok: true };
+  } catch (e) {
+    console.error('[naisu] 절전 방지 처리 실패', describeError(e));
+    return { ok: false, reason: describeError(e) };
+  }
+}
+
+chrome.runtime.onMessage.addListener((req: NaisuMessage, _sender, sendResponse) => {
   (async () => {
     try {
       if (req.type === 'naisu.download') {
         sendResponse(await handleDownload(req));
       } else if (req.type === 'naisu.webhook') {
         sendResponse(await handleWebhook(req));
+      } else if (req.type === 'naisu.power') {
+        sendResponse(handlePower(req.payload.on));
+      } else if (req.type === 'naisu.notify') {
+        sendResponse(await handleNotify(req.payload));
+      } else if (req.type === 'naisu.strip.files') {
+        sendResponse(await handleStripFiles(req.payload));
       } else if (req.type === 'naisu.badge') {
         chrome.action.setBadgeText({ text: req.payload.text });
         if (req.payload.color) {
@@ -374,13 +503,80 @@ chrome.runtime.onMessage.addListener((req: Req, _sender, sendResponse) => {
         }
         sendResponse({ ok: true });
       } else {
-        sendResponse({ error: 'unknown message' });
+        // content script 대상 메시지가 여기로 올 일은 없지만, 응답 없이 끝내면
+        // 호출한 쪽이 원인을 알 수 없게 되므로 항상 회신한다.
+        sendResponse({ ok: false, reason: `service worker가 처리하지 않는 메시지: ${String(req.type)}` });
       }
     } catch (e) {
       sendResponse({ error: String(e) });
     }
   })();
   return true; // async
+});
+
+/**
+ * N01: 단축키 배선.
+ *
+ * ⚠ 자동 배치는 runBatch() 안에서 약관 동의를 확인한다. 단축키가 그 게이트를 우회하지
+ *   않도록, 여기서는 새 실행 경로를 만들지 않고 기존 naisu.batch.* 메시지만 보낸다.
+ */
+const NAI_IMAGE_URL = 'https://novelai.net/image';
+
+async function activeNaiTabId(): Promise<number | null> {
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  return tab?.id != null && tab.url?.startsWith(NAI_IMAGE_URL) ? tab.id : null;
+}
+
+/** 단축키를 눌렀는데 아무 일도 안 일어나면 사용자가 원인을 알 수 없으므로 알림으로 알린다. */
+function notifyCommandFailed(message: string): void {
+  console.warn(`[naisu] 단축키 처리 실패 — ${message}`);
+  try {
+    chrome.notifications.create({
+      type: 'basic',
+      iconUrl: chrome.runtime.getURL('src/assets/icon-128.png'),
+      title: 'NAISU',
+      message,
+    });
+  } catch (e) {
+    console.error('[naisu] 단축키 실패 알림도 표시하지 못했습니다', describeError(e));
+  }
+}
+
+chrome.commands.onCommand.addListener((command) => {
+  void (async () => {
+    const tabId = await activeNaiTabId();
+    if (tabId === null) {
+      notifyCommandFailed('NovelAI 이미지 탭에서만 단축키를 쓸 수 있습니다.');
+      return;
+    }
+    try {
+      switch (command) {
+        case 'naisu-toggle-batch': {
+          // 실행 중이면 일시정지, 아니면 시작 — 시작은 반드시 batch.start를 거쳐
+          // content script의 약관 게이트를 타게 한다.
+          const state = await sendToTab(tabId, 'naisu.query.anlas');
+          if (state?.state.running) await sendToTab(tabId, 'naisu.batch.pause');
+          else await sendToTab(tabId, 'naisu.batch.start');
+          break;
+        }
+        case 'naisu-save-image':
+          await sendToTab(tabId, 'naisu.manual.download');
+          break;
+        case 'naisu-stop-batch':
+          await sendToTab(tabId, 'naisu.batch.stop');
+          break;
+        default:
+          console.warn(`[naisu] 알 수 없는 단축키: ${command}`);
+          return;
+      }
+      console.log(`[naisu] 단축키 처리됨: ${command}`);
+    } catch (e) {
+      notifyCommandFailed(
+        'NAISU가 페이지에 아직 붙지 않았습니다. NovelAI 탭을 새로고침한 뒤 다시 시도해 주세요.',
+      );
+      console.error('[naisu] 단축키 메시지 전송 실패', describeError(e));
+    }
+  })();
 });
 
 console.log(`[naisu] service worker booted — ${envFingerprint()}`);

@@ -1,11 +1,9 @@
 /* NAISU 플로팅 패널 — 우하단 고정, 컴팩트 */
+/* 색·크기 토큰은 lib/tokens.css 한 곳에서 정의한다 (팝업과 공유) */
+@import '../lib/tokens.css';
+
 #naisu-root{
-  --naisu-fg:#111;
-  --naisu-bg:#fafaf7;
-  --naisu-r:#d91919;
-  --naisu-mid:#666;
-  --naisu-soft:#e5e5e2;
-  font-family:"Pretendard Variable","Pretendard",-apple-system,BlinkMacSystemFont,system-ui,sans-serif;
+  font-family:var(--naisu-font);
   color:var(--naisu-fg);
   position:fixed;
   right:16px;bottom:16px;
@@ -29,7 +27,7 @@
 /* 실행 중일 때 강조 */
 .naisu-panel.running{
   border-color:var(--naisu-r);
-  box-shadow:3px 3px 0 var(--naisu-r), 0 0 0 3px rgba(217,25,25,.12);
+  box-shadow:3px 3px 0 var(--naisu-r), 0 0 0 3px var(--naisu-r-ring);
 }
 .naisu-panel.pulse{animation:naisuPulse 280ms ease-out}
 @keyframes naisuPulse{0%{transform:scale(1)}35%{transform:scale(1.025)}100%{transform:scale(1)}}
@@ -38,7 +36,7 @@
 }
 
 .np-h{
-  display:grid;grid-template-columns:auto auto 1fr auto;align-items:center;gap:6px;
+  display:flex;align-items:center;gap:6px;
   padding:6px 9px;border-bottom:1px solid var(--naisu-fg);
   background:var(--naisu-fg);color:var(--naisu-bg);
   cursor:grab;
@@ -46,38 +44,38 @@
 .np-h:active{cursor:grabbing}
 .np-h .brand{font-weight:900;font-size:12px;letter-spacing:.04em}
 .np-h .head-info{
-  display:flex;justify-content:flex-end;gap:8px;font-size:11px;
+  display:flex;justify-content:flex-end;align-items:center;gap:8px;font-size:11px;
   font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;
+  margin-left:auto;min-width:0;
 }
-.np-h .head-info .anlas-mini{color:#fff;font-weight:600}
-.np-h .head-info .prog-mini{color:#bbb;text-overflow:ellipsis;overflow:hidden}
+.np-h .head-info .anlas-mini{color:var(--naisu-on-fg);font-weight:600}
+.np-h .head-info .prog-mini{color:var(--naisu-on-fg-mid);text-overflow:ellipsis;overflow:hidden;min-width:0}
 .np-h .toggle{
-  background:transparent;border:1px solid #555;color:#fff;
+  background:transparent;border:1px solid var(--naisu-on-fg-line);color:var(--naisu-on-fg);
   padding:3px 9px;font:inherit;font-size:12px;cursor:pointer;
   transition-property:background-color,color,transform;transition-duration:110ms;
 }
-.np-h .toggle:hover{background:#fff;color:var(--naisu-fg)}
+.np-h .toggle:hover{background:var(--naisu-on-fg);color:var(--naisu-fg)}
 .np-h .toggle:active{transform:scale(.9)}
 
 /* 헤더 접힘 버튼 — 접혔을 때만 표시 */
 .np-h-btns{display:none;gap:4px}
 .naisu-panel.collapsed .np-h-btns{display:flex}
 .naisu-panel.collapsed .brand{display:none}
-.naisu-panel.collapsed .np-h{padding:9px 9px}
 .np-h-btns .h-btn-auto,
 .np-h-btns .h-btn-dl{
-  background:transparent;border:1px solid #555;color:#fff;
+  background:transparent;border:1px solid var(--naisu-on-fg-line);color:var(--naisu-on-fg);
   padding:4px 9px;font:inherit;font-size:12px;font-weight:700;cursor:pointer;
   white-space:nowrap;display:inline-flex;align-items:center;gap:4px;
   transition-property:background-color,color,transform;transition-duration:110ms;
 }
-.np-h-btns .h-btn-auto:hover,.np-h-btns .h-btn-dl:hover{background:#fff;color:var(--naisu-fg)}
+.np-h-btns .h-btn-auto:hover,.np-h-btns .h-btn-dl:hover{background:var(--naisu-on-fg);color:var(--naisu-fg)}
 .np-h-btns .h-btn-auto:active,.np-h-btns .h-btn-dl:active{transform:scale(.92)}
 .np-h-btns .h-btn-auto[data-running="1"]{border-color:var(--naisu-r);color:var(--naisu-r)}
-.np-h-btns .h-btn-auto[data-running="1"]:hover{background:var(--naisu-r);color:#fff;border-color:var(--naisu-r)}
+.np-h-btns .h-btn-auto[data-running="1"]:hover{background:var(--naisu-r);color:var(--naisu-on-fg);border-color:var(--naisu-r)}
 
 /* 헤더 바로 밑 진행바 — 접혔을 때도 보임 */
-.np-mini-bar{height:3px;background:#dcd6c0;border-bottom:1px solid var(--naisu-fg)}
+.np-mini-bar{height:3px;background:var(--naisu-track);border-bottom:1px solid var(--naisu-fg)}
 .np-mini-bar > span{display:block;height:100%;width:0%;background:var(--naisu-r);transition:width 260ms cubic-bezier(.2,.8,.2,1)}
 
 .np-b{padding:8px 10px}
@@ -148,10 +146,218 @@
 @media (prefers-reduced-motion:reduce){.naisu-alert{animation-duration:.01ms}}
 
 .np-log{
-  background:#fff;border:1px solid var(--naisu-soft);padding:6px 8px;margin-top:7px;
+  background:var(--naisu-surface);border:1px solid var(--naisu-soft);padding:6px 8px;margin-top:7px;
   font-size:12px;line-height:1.55;color:var(--naisu-mid);
   max-height:80px;overflow:auto;font-variant-numeric:tabular-nums;
 }
 .np-log:empty{display:none}
 .np-log em{color:var(--naisu-r);font-style:normal;font-weight:700}
-.np-log s{color:#1a7f3a;text-decoration:none;font-weight:700}
+.np-log s{color:var(--naisu-ok);text-decoration:none;font-weight:700}
+.np-log .t{color:var(--naisu-faint)}
+
+/* ===========================================================================
+   헤더 우측 액션 (최소화 · 접기) — U09
+   =========================================================================== */
+.np-h-actions{display:flex;gap:4px;align-items:center;flex:none}
+
+/* ===========================================================================
+   장수 보조 문구 · 유틸 버튼 줄 (테마 · 로그 · 진단 복사)
+   =========================================================================== */
+.count-hint{
+  font-size:11px;color:var(--naisu-mid);margin-top:4px;line-height:1.4;
+  font-variant-numeric:tabular-nums;
+}
+.count-hint:empty{display:none}
+
+.np-row.util-row{display:grid;grid-template-columns:repeat(2,1fr);gap:5px;margin-top:6px}
+.np-row.util-row > button{
+  background:var(--naisu-bg);border:2px solid var(--naisu-fg);color:var(--naisu-fg);
+  min-height:28px;padding:0 6px;font:inherit;font-size:11.5px;font-weight:700;line-height:1;cursor:pointer;
+  display:flex;align-items:center;justify-content:center;gap:4px;white-space:nowrap;
+  box-shadow:2px 2px 0 var(--naisu-fg);
+  transition-property:transform,box-shadow,background-color,color;
+  transition-duration:110ms;transition-timing-function:var(--naisu-ease);
+}
+.np-row.util-row > button:hover{transform:translate(-1px,-1px);box-shadow:3px 3px 0 var(--naisu-fg)}
+.np-row.util-row > button:active{transform:translate(2px,2px);box-shadow:0 0 0 var(--naisu-fg)}
+.np-row.util-row > button:focus-visible{outline:2px solid var(--naisu-r);outline-offset:2px}
+
+/* 로그 펼침 — 기본 80px 제약을 사용자가 풀 수 있게 (U02) */
+.np-log.expanded{max-height:280px;resize:vertical}
+/* 로그가 비어 있으면 평소엔 상자를 숨기지만(.np-log:empty), 펼치기를 눌렀을 때는
+   아무 반응이 없는 것처럼 보이면 안 되므로 빈 상자와 안내 문구를 보여 준다. */
+.np-log.expanded:empty{display:block;min-height:80px}
+.np-log.expanded:empty::before{
+  content:'아직 로그가 없습니다 — 실행하거나 저장하면 여기에 기록됩니다';
+  color:var(--naisu-faint);font-size:11.5px;
+}
+
+/* ===========================================================================
+   약관 동의 모달 (D01)
+   =========================================================================== */
+.naisu-disclaimer-overlay{
+  position:fixed;inset:0;z-index:2147483647;
+  display:flex;align-items:center;justify-content:center;padding:24px;
+  background:rgba(17,17,16,.55);
+}
+.naisu-disclaimer-overlay[hidden]{display:none}
+.naisu-disclaimer{
+  background:var(--naisu-bg);color:var(--naisu-fg);
+  border:2px solid var(--naisu-fg);box-shadow:5px 5px 0 var(--naisu-r);
+  width:min(560px,100%);max-height:min(80vh,640px);
+  display:flex;flex-direction:column;
+  font-size:13.5px;line-height:1.65;
+}
+.naisu-disclaimer h2{
+  margin:0;padding:12px 16px;font-size:15px;font-weight:900;letter-spacing:-.01em;
+  background:var(--naisu-fg);color:var(--naisu-bg);
+}
+.naisu-disclaimer h3{
+  margin:16px 0 8px;font-size:12px;font-weight:800;letter-spacing:.06em;
+  text-transform:uppercase;color:var(--naisu-mid);
+}
+.naisu-disclaimer-body{
+  padding:14px 16px;overflow-y:auto;flex:1;
+  display:flex;flex-direction:column;gap:10px;
+}
+.naisu-disclaimer-body:focus-visible{outline:2px solid var(--naisu-r);outline-offset:-2px}
+.naisu-disclaimer-body p{margin:0}
+.naisu-disclaimer .scope-note{
+  border-left:3px solid var(--naisu-fg);padding:8px 11px;
+  background:var(--naisu-surface);font-size:12.5px;
+}
+
+.tos-quotes{margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:14px}
+.tos-quotes > li{display:flex;flex-direction:column;gap:5px}
+.tos-label{
+  font-size:11px;font-weight:800;letter-spacing:.04em;color:var(--naisu-r);
+}
+.naisu-disclaimer blockquote{
+  margin:0;padding:9px 12px;
+  background:var(--naisu-surface);border-left:3px solid var(--naisu-r);
+  font-size:12.5px;line-height:1.6;word-break:break-word;
+}
+.tos-why{font-size:12.5px;color:var(--naisu-mid)}
+.tos-why strong{color:var(--naisu-fg)}
+.tos-link{display:flex;flex-direction:column;gap:3px;margin-top:4px}
+.tos-link a{color:var(--naisu-r);font-weight:700;font-size:12.5px}
+.tos-asof{font-size:11px;color:var(--naisu-mid);font-variant-numeric:tabular-nums}
+
+.naisu-disclaimer-check{
+  display:flex;gap:9px;align-items:flex-start;cursor:pointer;
+  padding:12px 16px;border-top:1px solid var(--naisu-soft);font-size:13px;
+}
+.naisu-disclaimer-check input{margin:2px 0 0;width:16px;height:16px;flex:none;accent-color:var(--naisu-r)}
+.naisu-disclaimer-check input:focus-visible{outline:2px solid var(--naisu-r);outline-offset:2px}
+
+.naisu-disclaimer-actions{
+  display:flex;gap:8px;justify-content:flex-end;
+  padding:0 16px 14px;
+}
+.naisu-disclaimer-actions button{
+  background:var(--naisu-bg);border:2px solid var(--naisu-fg);color:var(--naisu-fg);
+  padding:8px 16px;font:inherit;font-size:13px;font-weight:800;cursor:pointer;min-height:36px;
+  box-shadow:2px 2px 0 var(--naisu-fg);
+  transition-property:transform,box-shadow,background-color,color,opacity;
+  transition-duration:110ms;transition-timing-function:var(--naisu-ease);
+}
+.naisu-disclaimer-actions button:hover:not(:disabled){transform:translate(-1px,-1px);box-shadow:3px 3px 0 var(--naisu-fg)}
+.naisu-disclaimer-actions button:active:not(:disabled){transform:translate(2px,2px);box-shadow:0 0 0 var(--naisu-fg)}
+.naisu-disclaimer-actions button:focus-visible{outline:2px solid var(--naisu-r);outline-offset:2px}
+.naisu-disclaimer-actions .pri{background:var(--naisu-fg);color:var(--naisu-bg);box-shadow:2px 2px 0 var(--naisu-r)}
+.naisu-disclaimer-actions .pri:hover:not(:disabled){box-shadow:3px 3px 0 var(--naisu-r)}
+.naisu-disclaimer-actions .pri:active:not(:disabled){box-shadow:0 0 0 var(--naisu-r)}
+.naisu-disclaimer-actions .ghost{border-color:var(--naisu-mid);color:var(--naisu-mid);box-shadow:none}
+.naisu-disclaimer-actions .ghost:hover{border-color:var(--naisu-fg);color:var(--naisu-fg);box-shadow:none;transform:none}
+.naisu-disclaimer-actions button:disabled{opacity:.35;cursor:not-allowed;box-shadow:none;transform:none}
+
+/* Lucide 아이콘 — 버튼 글자와 같은 줄에 맞춘다 */
+.naisu-ico{flex:none;display:block}
+#naisu-root button{display:inline-flex;align-items:center;justify-content:center;gap:5px}
+
+/* ===========================================================================
+   아이콘 레일 모드 (#naisu-root.rail)
+   같은 DOM을 CSS로만 세로 툴바로 바꾼다 — 마크업이 갈라지지 않게 하기 위함.
+   =========================================================================== */
+#naisu-root.rail{width:56px}
+.rail .naisu-panel{position:relative}
+
+/* 버튼 글자 라벨은 숨기고 아이콘만 남긴다 (텍스트 노드는 CSS로 못 숨겨서 span으로 감쌌다) */
+.rail .btn-lbl{display:none}
+
+/* 헤더 — Anlas와 진행률을 세로로 쌓는다 */
+.rail .np-h{flex-direction:column;gap:1px;padding:6px 4px;text-align:center}
+.rail .np-h .brand{display:none}
+.rail .np-h .head-info{
+  flex-direction:column;gap:0;margin-left:0;font-size:9.5px;align-items:center;width:100%;
+}
+.rail .np-h .head-info .anlas-mini{font-size:10.5px;font-weight:700}
+.rail .np-h .head-info .prog-mini{font-size:9px;max-width:100%}
+.rail .np-h-actions{width:100%;justify-content:center;margin-top:2px}
+.rail .np-h-actions .toggle{padding:2px 6px}
+/* 접힘 상태에서 뜨던 가로 버튼들은 레일에선 본문 버튼과 중복이라 감춘다 */
+.rail .np-h-btns{display:none}
+
+/* 본문 — 모든 컨트롤을 1열로 */
+.rail .np-b{padding:5px}
+.rail .np-row.count-row{grid-template-columns:1fr;gap:4px}
+.rail .np-row.count-row > input.count{font-size:13px;min-height:30px;padding:4px 2px}
+.rail .np-row.count-row > button{min-height:32px;padding:0}
+.rail .np-row.util-row{grid-template-columns:1fr;gap:4px;margin-top:4px}
+.rail .np-row.util-row > button{min-height:30px;padding:0}
+.rail .count-hint{display:none}
+
+/* 로그 — 레일 폭에는 못 들어가므로, 펼치면 레일 옆에 떠서 보인다 */
+.rail .np-log{display:none}
+.rail .np-log.expanded,
+.rail .np-log.expanded:empty{
+  display:block;position:absolute;right:calc(100% + 8px);bottom:0;
+  width:230px;max-height:220px;margin:0;
+  background:var(--naisu-surface);border:2px solid var(--naisu-fg);
+  box-shadow:3px 3px 0 var(--naisu-r);z-index:1;
+}
+
+/* Anlas 표시 — 카드 모드에서는 한 줄, 레일 모드에서는 라벨을 값 위로 올린다 */
+.np-h .anlas-mini .k{margin-right:4px;opacity:.75}
+.rail .np-h .anlas-mini{display:flex;flex-direction:column;align-items:center;line-height:1.15}
+.rail .np-h .anlas-mini .k{
+  margin:0;font-size:8px;letter-spacing:.1em;text-transform:uppercase;opacity:.6;
+}
+.rail .np-h .anlas-mini .v{font-size:11.5px;font-weight:700}
+
+/* 접힘 상태에서 뜨는 가로 버튼은 레일에선 본문 버튼과 중복이라 감춘다.
+   .naisu-panel.collapsed .np-h-btns 가 클래스 3개(0,3,0)라 id를 붙여 우선순위를 올린다. */
+#naisu-root.rail .np-h-btns{display:none}
+
+/* 레일에서 진행 문구가 56px를 넘겨 양쪽이 잘리던 문제 */
+.rail .np-h .head-info{max-width:100%;overflow:hidden}
+.rail .np-h .head-info .prog-mini{
+  max-width:100%;font-size:8.5px;text-overflow:ellipsis;overflow:hidden;white-space:nowrap;
+}
+
+/* 레일에는 접기가 없다 — 56px에서 더 줄일 게 없고 상태만 늘어난다 */
+#naisu-root.rail .np-h-actions{display:none}
+
+/* ===========================================================================
+   접힘 상태 알림 pill — 화면 상단 중앙에서 아래로 내려왔다 2초 뒤 사라진다
+   실패 배너(.naisu-alerts)와 같은 고정 스택 안에 있어서 서로 겹치지 않는다.
+   =========================================================================== */
+.naisu-alert{align-self:stretch}
+.np-toast{
+  align-self:center;max-width:100%;
+  background:var(--naisu-fg);color:var(--naisu-bg);
+  border:2px solid var(--naisu-fg);border-radius:999px;
+  padding:8px 16px;font-size:12.5px;font-weight:600;line-height:1.4;
+  box-shadow:0 4px 14px rgba(0,0,0,.28);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+  font-variant-numeric:tabular-nums;
+}
+.np-toast[hidden]{display:none}
+.np-toast[data-kind='good']{border-color:var(--naisu-ok)}
+.np-toast[data-kind='bad']{background:var(--naisu-r);border-color:var(--naisu-r);color:#fff}
+.np-toast.in{animation:naisuToastDrop 260ms cubic-bezier(.2,.8,.2,1)}
+@keyframes naisuToastDrop{
+  from{opacity:0;transform:translateY(-28px) scale(.94)}
+  to{opacity:1;transform:translateY(0) scale(1)}
+}
+@media (prefers-reduced-motion:reduce){.np-toast.in{animation-duration:.01ms}}

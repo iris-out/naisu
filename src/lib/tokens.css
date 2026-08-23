@@ -1,0 +1,116 @@
+/* 폰트는 여기서 import하지 않는다.
+   이 파일은 팝업(확장 페이지)과 패널(novelai.net에 주입) 양쪽이 함께 쓰는데,
+   패널 CSS 안의 url(/fonts/...)은 확장이 아니라 novelai.net 기준으로 해석되어 404가 난다
+   (2026-08-23 실측). 팝업은 popup.css가 직접 import하고, 패널은 overlay.ts가
+   chrome.runtime.getURL()로 절대 경로를 만들어 런타임에 주입한다. */
+
+/**
+ * NAISU 공유 디자인 토큰.
+ *
+ * 팝업(확장 페이지)과 플로팅 패널(novelai.net에 주입)이 같은 값을 쓰게 하는 단일 출처.
+ * 셀렉터가 세 개인 이유:
+ *   :root         — 팝업/옵션 페이지
+ *   #naisu-root   — NAI 페이지에 주입되는 패널 (호스트 :root를 오염시키지 않으려고 스코프)
+ *   :host         — 패널을 Shadow DOM으로 옮긴 뒤(P04)에도 그대로 동작하도록 미리
+ *
+ * 이름에 --naisu- 접두사가 붙어 있는 건 novelai.net의 CSS 변수와 충돌하지 않게 하기 위함이다.
+ * 접두사 없는 짧은 이름(--bg, --fg …)은 팝업 전용 별칭이며 popup.css에서만 정의한다.
+ *
+ * ⚠ 타입/간격 스케일은 값만 정의해 두고 아직 적용하지 않았다. 현재 화면은 크기가
+ *   14종(10.5~38px)이라 지금 스케일로 강제하면 레이아웃이 바뀐다. 해당 규칙을 어차피
+ *   손보는 작업(팝업 접근성 A06, 패널 다크 U08)에서 한 화면씩 옮길 것.
+ */
+
+:root,
+:host,
+#naisu-root {
+  /* ---- 지면 ---- */
+  --naisu-bg: #fafaf7;        /* 오프화이트 — 카드/패널 바탕 */
+  --naisu-surface: #ffffff;   /* 한 겹 위 (로그 상자 등) */
+  --naisu-fg: #111111;        /* 텍스트 · 보더 */
+  --naisu-mid: #666666;       /* 보조 텍스트 */
+  --naisu-faint: #aaaaaa;     /* 타임스탬프처럼 더 약한 것 */
+  --naisu-soft: #e5e5e2;      /* 구분선 */
+  --naisu-hover: #f0eee8;     /* 행 hover 바탕 */
+  --naisu-track: #dcd6c0;     /* 진행바 트랙 */
+
+  /* ---- 의미 색 ---- */
+  --naisu-r: #d91919;         /* 강조 · 위험 · 실행 중 */
+  --naisu-r-ring: rgba(217, 25, 25, 0.12);
+  --naisu-r-tint: #fff8f8;    /* 입력 포커스 바탕 */
+  --naisu-ok: #1a7f3a;
+  --naisu-warn: #9a6100;
+
+  /* ---- 어두운 바탕 위(헤더 등)에서 쓰는 값 ---- */
+  --naisu-on-fg: #ffffff;
+  --naisu-on-fg-mid: #bbbbbb;
+  --naisu-on-fg-line: #555555;
+
+  /* ---- 컨트롤 ---- */
+  --naisu-switch-off: #cfcfcf;
+  --naisu-switch-knob: #ffffff;
+  --naisu-switch-inset: rgba(0, 0, 0, 0.1);
+  --naisu-switch-shadow: rgba(0, 0, 0, 0.32);
+
+  /* ---- 타입 스케일 (아직 미적용) ---- */
+  --naisu-fs-xs: 12px;
+  --naisu-fs-sm: 13px;
+  --naisu-fs-md: 14px;
+  --naisu-fs-lg: 16px;
+  --naisu-fs-xl: 20px;
+  --naisu-fs-2xl: 28px;
+  --naisu-fs-3xl: 38px;
+
+  /* ---- 간격 스케일 4px 배수 (아직 미적용) ---- */
+  --naisu-s1: 4px;
+  --naisu-s2: 8px;
+  --naisu-s3: 12px;
+  --naisu-s4: 16px;
+  --naisu-s5: 24px;
+  --naisu-s6: 32px;
+
+  /* ---- 조형 ---- */
+  --naisu-border: 2px solid var(--naisu-fg);
+  --naisu-shadow: 3px 3px 0 var(--naisu-fg);
+  --naisu-shadow-r: 3px 3px 0 var(--naisu-r);
+  --naisu-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --naisu-dur-fast: 110ms;
+  --naisu-dur: 220ms;
+
+  --naisu-font: "Pretendard Variable", "Pretendard", -apple-system, BlinkMacSystemFont,
+    system-ui, sans-serif;
+}
+
+/**
+ * 다크 변형 — 값만 준비해 두고 아직 아무도 켜지 않는다.
+ * 켜는 쪽(패널 U08 / 팝업)이 루트 요소에 .naisu-dark 를 붙이면 그때부터 적용된다.
+ * prefers-color-scheme에 직접 걸지 않은 이유: 지금 켜면 F0-3의 "시각적 변화 없음"이 깨지고,
+ * 다크를 켤지 말지는 사용자 설정으로 두는 편이 이 확장에 맞다(NAI 화면 위에 겹쳐 뜨므로).
+ */
+.naisu-dark,
+.naisu-dark :host,
+#naisu-root.naisu-dark {
+  --naisu-bg: #1b1a18;
+  --naisu-surface: #121211;
+  --naisu-fg: #f2f0e8;
+  --naisu-mid: #9e9b91;
+  --naisu-faint: #6f6c64;
+  --naisu-soft: #302e29;
+  --naisu-hover: #26241f;
+  --naisu-track: #3a372f;
+
+  --naisu-r: #ff5140;
+  --naisu-r-ring: rgba(255, 81, 64, 0.16);
+  --naisu-r-tint: #2a1a18;
+  --naisu-ok: #4fbe75;
+  --naisu-warn: #d9a441;
+
+  --naisu-on-fg: #121211;
+  --naisu-on-fg-mid: #55524b;
+  --naisu-on-fg-line: #8a867c;
+
+  --naisu-switch-off: #4a4741;
+  --naisu-switch-knob: #f2f0e8;
+  --naisu-switch-inset: rgba(0, 0, 0, 0.35);
+  --naisu-switch-shadow: rgba(0, 0, 0, 0.5);
+}

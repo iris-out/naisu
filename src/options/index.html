@@ -1,0 +1,14 @@
+<!doctype html>
+<!-- 팝업과 같은 화면을 넓게 여는 탭. 화면 코드는 popup/screens/* 를 그대로 재사용한다. -->
+<html lang="ko" class="naisu-wide">
+<head>
+  <meta charset="utf-8">
+  <!-- 번들에 넣지 않고 정적 파일로 — 확장 페이지에선 /fonts/ 가 chrome-extension:// 기준 -->
+  <link rel="stylesheet" href="/fonts/pretendard.css">
+  <title>NAISU 설정</title>
+</head>
+<body>
+  <main id="app"></main>
+  <script type="module" src="../popup/popup.ts"></script>
+</body>
+</html>

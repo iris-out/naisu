@@ -7,6 +7,9 @@
  * 자세한 분석: docs/04-nai-dom-notes.md
  */
 
+import type { SelfCheckItem, SelfCheckResponse } from '../lib/messages';
+import { pmSetText } from './dom-helpers';
+
 /** 화면에 보이는 노드만 (display:none 제외, 모바일 트레이 회피) */
 export function pickVisible<T extends HTMLElement = HTMLElement>(sel: string): T | null {
   for (const el of Array.from(document.querySelectorAll<T>(sel))) {
@@ -222,20 +225,231 @@ let seedButtonCache: HTMLButtonElement | null = null;
 export function findSeedButton(): HTMLButtonElement | null {
   if (seedButtonCache && !seedButtonCache.isConnected) seedButtonCache = null;
   if (seedButtonCache) return seedButtonCache;
-  const r = document.evaluate(
-    "//span[normalize-space(text())='Seed']/following-sibling::button[1]",
-    document.body,
-    null,
-    XPathResult.FIRST_ORDERED_NODE_TYPE,
-    null,
+
+  // 2026-08-23 실측: 기존 XPath 하나만으로는 못 찾는 페이지 상태가 있다
+  // (콘솔에서 //span[text()='Seed']/following-sibling::button[1] → null).
+  // 못 찾으면 runner가 시드 무작위화를 통째로 건너뛰어 같은 이미지가 반복되므로,
+  // 전략을 여러 개 두고 전부 실패했을 때만 null을 돌려준다.
+  const strategies: Array<[string, () => HTMLButtonElement | null]> = [
+    // ① 'Seed' span 바로 뒤 형제 버튼 (기존 구조)
+    [
+      "span[text()='Seed'] 다음 형제 button",
+      () => xpathButton("//span[normalize-space(text())='Seed']/following-sibling::button[1]"),
+    ],
+    // ② 태그를 가리지 않고 'Seed' 텍스트 노드를 가진 요소의 조상 안에서 첫 버튼
+    [
+      "'Seed' 라벨의 부모 컨테이너 안 첫 button",
+      () =>
+        xpathButton(
+          "//*[normalize-space(text())='Seed']/ancestor-or-self::*[position()<=3]//button[1]",
+        ),
+    ],
+    // ③ aria-label에 seed가 들어간 버튼 (NAI가 접근성 라벨을 달아 둔 경우)
+    [
+      'button[aria-label*=seed]',
+      () =>
+        (document.querySelector<HTMLButtonElement>(
+          'button[aria-label*="seed" i], button[title*="seed" i]',
+        ) ?? null),
+    ],
+  ];
+
+  for (const [label, fn] of strategies) {
+    let btn: HTMLButtonElement | null = null;
+    try {
+      btn = fn();
+    } catch (e) {
+      console.warn(`[naisu] findSeedButton: 전략 "${label}" 실행 중 오류`, e);
+      continue;
+    }
+    if (btn) {
+      seedButtonCache = btn;
+      return btn;
+    }
+  }
+
+  console.warn(
+    '[naisu] findSeedButton: 시드 버튼을 찾지 못했습니다 — 시드 무작위화를 건너뜁니다. ' +
+      'NAI가 시드 UI 구조를 바꿨을 수 있습니다. 콘솔에서 ' +
+      `document.evaluate("//*[normalize-space(text())='Seed']", document.body, null, 9, null).singleNodeValue ` +
+      '를 실행해 구조를 확인해 주세요.',
   );
-  const btn = (r.singleNodeValue as HTMLButtonElement | null) ?? null;
-  if (btn) seedButtonCache = btn;
-  return btn;
+  return null;
+}
+
+function xpathButton(expr: string): HTMLButtonElement | null {
+  const r = document.evaluate(expr, document.body, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null);
+  const node = r.singleNodeValue;
+  return node instanceof HTMLButtonElement ? node : null;
 }
 
 /** 현재 NAI 시드 표시값 ("N/A" or "1234567890") */
 export function readSeedDisplay(): string | null {
   const btn = findSeedButton();
   return btn?.textContent?.trim() ?? null;
+}
+
+// ---------------------------------------------------------------------------
+// N06. 네거티브(UC)·캐릭터 슬롯 주입 헬퍼
+//
+// 이력은 이미 캐릭터 프롬프트를 저장하고 있지만(lib/storage.ts::Settings.characterPrompts),
+// 지금까지는 아무도 SEL.mainUC / SEL.characterN을 실제로 쓰지 않아서 배치가 UC나 캐릭터
+// 슬롯을 변형할 방법이 없었다. 여기서는 주입/읽기 함수만 만든다 — 배선(언제 호출할지)은
+// 다른 작업의 몫.
+// ---------------------------------------------------------------------------
+
+/**
+ * 화면에 보이는 UC(네거티브) ProseMirror에 텍스트를 주입한다.
+ * 모바일 트레이 등 숨은 사본이 같이 매칭될 수 있어서 pickVisible로 걸러낸다.
+ *
+ * @returns 성공하면 true, UC 입력 노드를 못 찾으면 false(조용히 삼키지 않고 console.warn)
+ */
+export function setUcText(text: string): boolean {
+  const el = pickVisible<HTMLElement>(SEL.mainUC);
+  if (!el) {
+    console.warn(`[naisu] setUcText: UC ProseMirror 노드를 찾지 못함 (SEL.mainUC="${SEL.mainUC}")`);
+    return false;
+  }
+  return pmSetText(el, text);
+}
+
+/** 현재 UC(네거티브) 프롬프트 내용을 읽는다 (배치 전후 값 복원용). */
+export function readUcText(): string | null {
+  const el = pickVisible<HTMLElement>(SEL.mainUC);
+  if (!el) {
+    console.warn(`[naisu] readUcText: UC ProseMirror 노드를 찾지 못함 (SEL.mainUC="${SEL.mainUC}")`);
+    return null;
+  }
+  return el.textContent ?? '';
+}
+
+/**
+ * n번 캐릭터 슬롯의 프롬프트 ProseMirror에 텍스트를 주입한다.
+ *
+ * **인덱스는 0-based로 가정한다** — 즉 처음 추가한 캐릭터 슬롯이 `n=0`. NAI가
+ * `character-prompt-input-${n}` 클래스를 배열을 `.map((c, i) => ...)`로 렌더링하며
+ * 붙이는 흔한 React 패턴을 따른다는 가정이며, `SEL.characterN` 자체의 정의(단순
+ * 템플릿 치환)만으로는 0-based/1-based 여부를 단정할 근거가 없다 — **실제 라이브
+ * NAI 페이지에서 클래스명을 콘솔로 직접 찍어 확인한 적은 없다.** UI에 보이는
+ * "Character 1" 같은 라벨과 오프셋이 다를 수 있으니, 배선하는 쪽에서 반드시
+ * 아래 "검증" 절차로 실제 인덱스를 먼저 확인할 것.
+ *
+ * @param n 캐릭터 슬롯 인덱스 (0-based로 가정, 미검증)
+ * @returns 성공하면 true, 해당 슬롯이 없으면 false
+ */
+export function setCharacterPrompt(n: number, text: string): boolean {
+  const el = pickVisible<HTMLElement>(SEL.characterN(n));
+  if (!el) {
+    console.warn(
+      `[naisu] setCharacterPrompt: ${n}번 캐릭터 슬롯을 찾지 못함 — 슬롯이 안 열려있거나 인덱스 규칙(0/1-based)이 다를 수 있음`,
+    );
+    return false;
+  }
+  return pmSetText(el, text);
+}
+
+/** 현재 열려 있는 캐릭터 슬롯 개수. */
+export function countCharacterSlots(): number {
+  const prefix = 'prompt-input-box-character-prompts-';
+  const nodes = document.querySelectorAll<HTMLElement>(`[class*="${prefix}"]`);
+  const indices = new Set<number>();
+  nodes.forEach((el) => {
+    const cls = Array.from(el.classList).find((c) => c.startsWith(prefix));
+    if (!cls) return;
+    const idx = Number(cls.slice(prefix.length));
+    if (Number.isFinite(idx)) indices.add(idx);
+  });
+  return indices.size;
+}
+
+// ---------------------------------------------------------------------------
+// N02. 셀렉터 자가진단
+// ---------------------------------------------------------------------------
+
+/** 노드 요약(태그 + 클래스 일부) — 자가진단 detail에 쓰임 */
+function describeElement(el: Element): string {
+  const tag = el.tagName.toLowerCase();
+  const cls = Array.from(el.classList).slice(0, 3).join('.');
+  return cls ? `<${tag} class="${cls}">` : `<${tag}>`;
+}
+
+/**
+ * NAI DOM 셀렉터가 아직 유효한지 검사한다. 부작용 없음(읽기 전용 — 클릭/값 변경 금지).
+ *
+ * "배치를 돌려봐야 깨진 걸 안다"는 문제를 해결하려는 목적이라, 실패한 항목뿐 아니라
+ * 성공한 항목도 detail에 실제로 찾은 값(태그/클래스/개수/Anlas 값 등)을 남겨서
+ * 사용자 진단 정보로 그대로 쓸 수 있게 한다.
+ */
+export function runSelfCheck(): SelfCheckResponse {
+  const items: SelfCheckItem[] = [];
+
+  // 1) 프롬프트 입력 영역
+  {
+    const el = pickVisible<HTMLElement>(SEL.mainPrompt);
+    items.push({
+      key: 'mainPrompt',
+      label: '프롬프트 입력 영역',
+      ok: !!el,
+      detail: el
+        ? `찾음 — ${describeElement(el)}, 텍스트 길이=${el.textContent?.length ?? 0}`
+        : `SEL.mainPrompt("${SEL.mainPrompt}") 매칭 노드 없음 — ProseMirror 클래스명이 바뀌었을 수 있음`,
+    });
+  }
+
+  // 2) Generate 버튼
+  {
+    const btn = findGenerateButton();
+    items.push({
+      key: 'generateButton',
+      label: 'Generate 버튼',
+      ok: !!btn,
+      detail: btn
+        ? `찾음 — ${describeElement(btn)}, 텍스트="${(btn.textContent ?? '').trim().slice(0, 30)}", disabled=${btn.disabled}`
+        : `"Generate"와 "Anlas" 문구를 동시에 포함한 button을 못 찾음 — 페이지 로딩 중이거나 버튼 문구가 바뀌었을 수 있음`,
+    });
+  }
+
+  // 3) 시드 버튼
+  {
+    const btn = findSeedButton();
+    items.push({
+      key: 'seedButton',
+      label: '시드 버튼',
+      ok: !!btn,
+      detail: btn
+        ? `찾음 — ${describeElement(btn)}, 표시값="${(btn.textContent ?? '').trim()}"`
+        : `"Seed" 라벨 옆 button을 XPath로 못 찾음 — 라벨 텍스트나 DOM 구조가 바뀌었을 수 있음`,
+    });
+  }
+
+  // 4) Anlas 표시
+  {
+    const anlas = readAnlas();
+    items.push({
+      key: 'anlas',
+      label: 'Anlas 표시',
+      ok: anlas !== null,
+      detail:
+        anlas !== null
+          ? `읽음 — ${anlas} Anlas`
+          : `"Anlas:" 라벨을 XPath로 못 찾았거나 값 파싱 실패 — 잔량 확인 없이 배치를 돌리면 위험`,
+    });
+  }
+
+  // 5) 결과 이미지 컨테이너
+  {
+    const imgs = findGridImages();
+    items.push({
+      key: 'resultImage',
+      label: '결과 이미지 컨테이너',
+      ok: imgs.length > 0,
+      detail:
+        imgs.length > 0
+          ? `찾음 — ${imgs.length}장, 예: ${describeElement(imgs[0])} (${imgs[0].naturalWidth}x${imgs[0].naturalHeight})`
+          : `SEL.resultImage("${SEL.resultImage}") 매칭 이미지 없음 — 아직 생성한 이미지가 없어서일 수도 있고(정상) 셀렉터가 깨졌을 수도 있음`,
+    });
+  }
+
+  const okCount = items.filter((i) => i.ok).length;
+  return { items, okCount, total: items.length };
 }

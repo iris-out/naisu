@@ -1,7 +1,6 @@
 node_modules/
 dist/
 *.zip
-tests/
 *.webp
 report_*.md
 CLAUDE.md
