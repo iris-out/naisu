@@ -51,9 +51,9 @@ export const safetyScreen: Screen = {
         <div class="lbl">생성 속도</div>
         <div class="seg" id="cooldown-preset" role="radiogroup" style="--seg-n:4">
           <span class="seg-indicator"></span>
-          <button data-v="2000">안전 2초</button>
-          <button data-v="1500">보통 1.5초</button>
-          <button data-v="1000">빠름 1초</button>
+          <button data-v="2000">2초</button>
+          <button data-v="1500">1.5초</button>
+          <button data-v="1000">1초</button>
           <button data-v="custom">직접</button>
         </div>
         <div id="cooldown-custom-wrap" style="margin:8px 0" hidden>

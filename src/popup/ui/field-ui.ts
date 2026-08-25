@@ -16,7 +16,7 @@ import { flashHint } from './status';
 
 /** 위험도 배지 HTML — 화면 상단이나 홈 메뉴 요약에 붙인다 */
 export function riskBadge(level: RiskLevel, text?: string): string {
-  const label = text ?? ({ ok: '안전', warn: '주의', danger: '위험' }[level]);
+  const label = text ?? ({ ok: '비교적 안전', warn: '주의', danger: '위험' }[level]);
   return `<span class="badge badge-${level}">${label}</span>`;
 }
 
@@ -69,5 +69,5 @@ export function bindRevertScreen(
 export async function refreshScreenRisk(el: HTMLElement | null, screen: ScreenId): Promise<void> {
   if (!el) return;
   const v = riskOfScreen(screen, await getSettings());
-  el.innerHTML = riskBadge(v.level, v.level === 'ok' ? '현재 안전' : undefined);
+  el.innerHTML = riskBadge(v.level);
 }

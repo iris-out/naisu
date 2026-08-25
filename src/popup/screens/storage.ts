@@ -10,6 +10,7 @@ import {
   type ConflictAction,
   type DownloadMode,
   type FilenameContext,
+  type ImageOps,
   type Settings,
 } from '../../lib/storage';
 import { opsSummary } from '../../lib/image-ops';
@@ -26,6 +27,22 @@ export function labelDownloadMode(m: DownloadMode): string {
   return m === 'hardclean' ? '하드클린' : m === 'clean' ? '클린' : m === 'raw' ? '원본' : '클린+원본';
 }
 
+/** 품질 드롭다운 선택지 — 100이 원본에 가장 가깝고 60이 용량을 가장 많이 줄인다. */
+const QUALITY_PRESETS = [1, 0.9, 0.8, 0.7, 0.6];
+
+/**
+ * 품질 값에 대한 설명 한두 줄 — 드롭다운 아래 헬프라인에 그대로 쓴다.
+ * 하드클린의 EXIF·알파 채널 제거는 품질과 무관하게 항상 적용되므로(확인된 은닉 경로는
+ * 이 둘뿐 — report_0821.md), 여기서는 화질·용량 트레이드오프만 설명한다.
+ */
+function qualityHelpText(q: number): string {
+  if (q >= 1) return '원본에 가장 가까운 화질입니다. 용량이 가장 큽니다.';
+  if (q >= 0.9) return '육안으로 거의 구분되지 않는 화질입니다. 기본값으로 추천합니다.';
+  if (q >= 0.8) return '약간의 손실이 있지만 대부분 눈치채기 어렵습니다. 용량이 상당히 줄어듭니다.';
+  if (q >= 0.7) return '손실이 눈에 띄기 시작합니다. 용량을 더 줄이고 싶을 때 씁니다.';
+  return '화질 저하가 뚜렷합니다. 용량이 가장 작습니다.';
+}
+
 /**
  * 저장 방식 세로 리스트 — 안전한 순서대로.
  * 배지 문구는 화면 전용 표현이지만, 배지 "레벨"(ok/warn/danger)은 하드코딩하지 않고
@@ -37,7 +54,7 @@ const MODE_ORDER: { value: DownloadMode; label: string; desc: string; badge: str
   {
     value: 'hardclean',
     label: '하드클린',
-    desc: 'JPEG로 다시 인코딩. 알파 채널이 사라져 은닉 데이터까지 제거',
+    desc: '픽셀을 다시 그려 재인코딩(기본 WebP, 아래 출력 포맷에서 JPEG로도 가능). 알파 채널이 사라져 은닉 데이터까지 제거',
     badge: '가장 안전',
   },
   {
@@ -92,7 +109,7 @@ const PREVIEW_CTX: FilenameContext = {
 };
 
 const KEEP_COLOR_HELP_DEFAULT = 'ICC 프로파일을 보존합니다. 보통은 꺼도 됩니다.';
-const KEEP_COLOR_HELP_LOCKED = '하드클린은 JPEG로 새로 인코딩하므로 프로파일이 남지 않습니다.';
+const KEEP_COLOR_HELP_LOCKED = '하드클린은 캔버스로 다시 그려 재인코딩하므로(JPEG든 WebP든) 프로파일이 남지 않습니다.';
 
 /**
  * 폴더 한 칸 ↔ 두 필드 변환 규칙.
@@ -171,9 +188,14 @@ function updateColorProfileLock(mode: DownloadMode): void {
   help.innerHTML = helpLine(locked ? KEEP_COLOR_HELP_LOCKED : KEEP_COLOR_HELP_DEFAULT);
 }
 
-/** 현재 선택된 저장 방식에 맞춰 파일 확장자를 붙인다 (CLAUDE.md: 하드클린만 .jpg, 나머지는 .webp). */
-function extFor(mode: DownloadMode): string {
-  return mode === 'hardclean' ? '.jpg' : '.webp';
+/**
+ * 현재 선택된 저장 방식 + 출력 포맷에 맞춰 파일 확장자를 붙인다.
+ * raw는 후처리가 절대 적용되지 않으므로(규칙은 service-worker.ts가 강제) 포맷과
+ * 무관하게 항상 .webp. 그 외 모드는 출력 포맷이 JPEG일 때만 .jpg, 아니면 .webp.
+ */
+function extFor(mode: DownloadMode, format: ImageOps['format']): string {
+  if (mode === 'raw') return '.webp';
+  return format === 'jpg' ? '.jpg' : '.webp';
 }
 
 function updateFolderPreview(): void {
@@ -185,11 +207,11 @@ function updateFolderPreview(): void {
   out.textContent = `→ ${rendered}/`;
 }
 
-function updateFilenamePreview(mode: DownloadMode): void {
+function updateFilenamePreview(mode: DownloadMode, format: ImageOps['format']): void {
   const out = $('#filename-preview');
   const tplEl = $<HTMLInputElement>('#filename-tpl');
   if (!out || !tplEl) return;
-  out.textContent = `→ ${renderFilename(tplEl.value, PREVIEW_CTX)}${extFor(mode)}`;
+  out.textContent = `→ ${renderFilename(tplEl.value, PREVIEW_CTX)}${extFor(mode, format)}`;
 }
 
 export const storageScreen: Screen = {
@@ -220,6 +242,21 @@ export const storageScreen: Screen = {
 
       <div class="lbl">저장 방식 — 위로 갈수록 안전</div>
       <div class="modes" id="dl-mode-list" role="radiogroup" aria-label="저장 방식">${modeItems}</div>
+
+      <div class="card">
+        <div class="lbl">품질</div>
+        <select id="dl-quality">
+          ${QUALITY_PRESETS.map((q) => `<option value="${q}">${Math.round(q * 100)}</option>`).join('')}
+        </select>
+        <div id="quality-help"></div>
+        <div class="lbl" style="margin-top:8px">출력 포맷</div>
+        <div class="seg" id="dl-format" role="radiogroup" style="--seg-n:3">
+          <span class="seg-indicator"></span>
+          <button data-v="auto">NAI 기본 (WebP)</button>
+          <button data-v="jpg">JPEG</button>
+          <button data-v="webp">WebP</button>
+        </div>
+      </div>
 
       <div class="card">
         <label class="full">
@@ -301,6 +338,7 @@ export const storageScreen: Screen = {
   async mount() {
     const s = await getSettings();
     let currentMode: DownloadMode = s.downloadMode;
+    let currentFormat: ImageOps['format'] = s.imageOps.format;
 
     // bindModeList/bindSeg는 버튼에 직접 이벤트 리스너를 붙이는 방식이라, 되돌리기 때마다
     // 다시 호출하면 리스너가 계속 누적된다(클릭 한 번에 저장이 여러 번 일어남). 그래서
@@ -308,11 +346,34 @@ export const storageScreen: Screen = {
     const activateMode = bindModeList(must('#dl-mode-list'), s.downloadMode, async (v) => {
       currentMode = v;
       updateColorProfileLock(v);
-      updateFilenamePreview(currentMode);
+      updateFilenamePreview(currentMode, currentFormat);
       await setSettings({ downloadMode: v });
       flashHint('저장됨');
     });
     updateColorProfileLock(s.downloadMode);
+
+    const activateFormat = bindSeg(must('#dl-format'), s.imageOps.format, async (v) => {
+      currentFormat = v as ImageOps['format'];
+      updateFilenamePreview(currentMode, currentFormat);
+      const fresh = await getSettings();
+      await setSettings({ imageOps: { ...fresh.imageOps, format: currentFormat } });
+      flashHint('저장됨');
+    });
+
+    const qualitySelect = must<HTMLSelectElement>('#dl-quality');
+    const qualityHelp = must('#quality-help');
+    const refreshQualityHelp = (v: number): void => {
+      qualityHelp.innerHTML = helpLine(qualityHelpText(v));
+    };
+    qualitySelect.value = String(s.imageOps.quality);
+    refreshQualityHelp(s.imageOps.quality);
+    qualitySelect.addEventListener('change', async () => {
+      const q = Number(qualitySelect.value);
+      refreshQualityHelp(q);
+      const fresh = await getSettings();
+      await setSettings({ imageOps: { ...fresh.imageOps, quality: q } });
+      flashHint('저장됨');
+    });
 
     bindInput('#folder-combo', joinFolderCombo(s.downloadFolder, s.batchFolderTemplate), (v) => {
       const parts = splitFolderCombo(v);
@@ -339,8 +400,8 @@ export const storageScreen: Screen = {
     });
 
     bindInput('#filename-tpl', s.filenameTemplate, (v) => setSettings({ filenameTemplate: v }));
-    filenameInput.addEventListener('input', () => updateFilenamePreview(currentMode));
-    updateFilenamePreview(currentMode);
+    filenameInput.addEventListener('input', () => updateFilenamePreview(currentMode, currentFormat));
+    updateFilenamePreview(currentMode, currentFormat);
 
     $$('#filename-tokens span').forEach((chip) =>
       chip.addEventListener('click', () => {
@@ -373,6 +434,10 @@ export const storageScreen: Screen = {
       currentMode = fresh.downloadMode;
       activateMode(fresh.downloadMode);
       updateColorProfileLock(fresh.downloadMode);
+      currentFormat = fresh.imageOps.format;
+      activateFormat(fresh.imageOps.format);
+      qualitySelect.value = String(fresh.imageOps.quality);
+      refreshQualityHelp(fresh.imageOps.quality);
       const comboEl = must<HTMLInputElement>('#folder-combo');
       comboEl.value = joinFolderCombo(fresh.downloadFolder, fresh.batchFolderTemplate);
       updateFolderPreview();
@@ -380,7 +445,7 @@ export const storageScreen: Screen = {
       activatePreset(preset);
       filenameInput.value = fresh.filenameTemplate;
       filenameInput.hidden = preset !== 'custom';
-      updateFilenamePreview(currentMode);
+      updateFilenamePreview(currentMode, currentFormat);
       syncSwitch(fresh.keepColorProfile);
       await refreshScreenRisk($('#storage-risk'), 'storage');
     };

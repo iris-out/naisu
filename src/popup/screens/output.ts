@@ -1,9 +1,8 @@
 /**
- * 저장 후처리 화면 — 품질·포맷·워터마크·크레딧.
+ * 저장 후처리 화면 — 워터마크·크레딧.
  *
- * 다운로드 화면(storage.ts)이 "무엇을 지울지"를 다룬다면 여기는 "어떤 파일로 낼지"를 다룬다.
- * 두 축이 실제로 다르기 때문에 화면을 나눴다 — 하드클린/클린은 안전에 관한 결정이고,
- * 품질·포맷은 용도(업로드·보관)에 관한 결정이다.
+ * 다운로드 화면(storage.ts)이 "무엇을 지울지"(저장 방식·품질·포맷)를 다룬다면 여기는
+ * 파일에 뭘 더 얹을지(워터마크·크레딧)를 다룬다.
  *
  * ⚠ 여기 설정은 **원본(raw) 모드에는 적용되지 않는다.** "원본"이 원본이 아니게 되면
  *   그 모드의 존재 이유가 사라지기 때문 — 규칙 자체는 service-worker.ts가 강제한다.
@@ -19,22 +18,6 @@ import { bindSwitch } from '../ui/switch';
 import { helpLine } from '../ui/field-ui';
 import { flashHint } from '../ui/status';
 import type { Screen } from './types';
-
-/** 품질 드롭다운 선택지 — 100이 원본에 가장 가깝고 60이 용량을 가장 많이 줄인다. */
-const QUALITY_PRESETS = [1, 0.9, 0.8, 0.7, 0.6];
-
-/**
- * 품질 값에 대한 설명 한두 줄 — 드롭다운 아래 헬프라인에 그대로 쓴다.
- * 하드클린의 EXIF·알파 채널 제거는 품질과 무관하게 항상 적용되므로(확인된 은닉 경로는
- * 이 둘뿐 — report_0821.md), 여기서는 화질·용량 트레이드오프만 설명한다.
- */
-function qualityHelpText(q: number): string {
-  if (q >= 1) return '원본에 가장 가까운 화질입니다. 용량이 가장 큽니다.';
-  if (q >= 0.9) return '육안으로 거의 구분되지 않는 화질입니다. 기본값으로 추천합니다.';
-  if (q >= 0.8) return '약간의 손실이 있지만 대부분 눈치채기 어렵습니다. 용량이 상당히 줄어듭니다.';
-  if (q >= 0.7) return '손실이 눈에 띄기 시작합니다. 용량을 더 줄이고 싶을 때 씁니다.';
-  return '화질 저하가 뚜렷합니다. 용량이 가장 작습니다.';
-}
 
 /** 현재 ops를 한 줄 요약으로 — 화면 상단과 홈 메뉴 배지가 같은 문장을 쓴다. */
 export function describeImageOps(s: Settings): string {
@@ -59,21 +42,7 @@ export const outputScreen: Screen = {
         <h2>저장 후처리</h2>
       </header>
 
-      <div class="card">
-        <div class="lbl">품질</div>
-        <select id="ops-quality">
-          ${QUALITY_PRESETS.map((q) => `<option value="${q}">${Math.round(q * 100)}</option>`).join('')}
-        </select>
-        <div id="ops-quality-help"></div>
-        <div class="lbl" style="margin-top:8px">출력 포맷</div>
-        <div class="seg" id="ops-format" role="radiogroup" style="--seg-n:3">
-          <span class="seg-indicator"></span>
-          <button data-v="auto">NAI 기본 (WebP)</button>
-          <button data-v="jpg">JPEG</button>
-          <button data-v="webp">WebP</button>
-        </div>
-        <div id="ops-summary" class="preview-line"></div>
-      </div>
+      <div id="ops-summary" class="preview-line" style="margin:0 0 10px"></div>
 
       <div class="card">
         <label class="row sw-row">
@@ -133,27 +102,8 @@ export const outputScreen: Screen = {
 
     const summary = must('#ops-summary');
     const refreshSummary = (): void => {
-      summary.textContent = `→ ${opsSummary(ops) || '후처리 없음 (기본 품질)'}`;
+      summary.textContent = `→ ${opsSummary(ops) || '후처리 없음'}`;
     };
-
-    const qualitySelect = must<HTMLSelectElement>('#ops-quality');
-    const qualityHelp = must('#ops-quality-help');
-    const refreshQualityHelp = (): void => {
-      qualityHelp.innerHTML = helpLine(qualityHelpText(ops.quality));
-    };
-
-    bindSeg(must('#ops-format'), ops.format, async (v) => {
-      ops = await patchOps({ format: v as ImageOps['format'] });
-      refreshSummary();
-    });
-
-    qualitySelect.value = String(ops.quality);
-    refreshQualityHelp();
-    qualitySelect.addEventListener('change', async () => {
-      ops = await patchOps({ quality: Number(qualitySelect.value) });
-      refreshQualityHelp();
-      refreshSummary();
-    });
 
     // ---- 워터마크 ----
     const wmFields = must('#wm-fields');
@@ -261,5 +211,14 @@ export const outputScreen: Screen = {
     syncCredit();
 
     refreshSummary();
+  },
+
+  /**
+   * 품질·출력 포맷은 다운로드 화면(storage.ts)에서 바꾼다 — 거기서 바꾸고 돌아왔을 때
+   * 요약이 옛 값으로 남아 있지 않게 화면을 다시 그린다.
+   */
+  async enter() {
+    const s = await getSettings();
+    must('#ops-summary').textContent = `→ ${opsSummary(s.imageOps) || '후처리 없음'}`;
   },
 };

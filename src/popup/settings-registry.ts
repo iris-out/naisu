@@ -128,7 +128,7 @@ export const FIELDS: SettingField[] = [
     screen: 'storage',
     label: '저장 방식',
     help: '이미지에 박힌 생성 정보(프롬프트·시드)를 얼마나 지울지 정합니다.',
-    keywords: ['하드클린', '클린', '원본', '메타데이터', 'exif', '제거'],
+    keywords: ['하드클린', '클린', '원본', '메타데이터', 'exif', '제거', '포맷', 'jpeg', 'webp', '품질'],
     describe: (s) =>
       ({ hardclean: '하드클린', clean: '클린', raw: '원본', both: '클린+원본' })[s.downloadMode],
     risk: (s) =>
@@ -201,8 +201,8 @@ export const FIELDS: SettingField[] = [
     key: 'imageOps',
     screen: 'output',
     label: '저장 후처리',
-    help: '품질·포맷·워터마크·크레딧. 원본(raw) 모드에는 적용되지 않습니다.',
-    keywords: ['품질', '워터마크', '포맷', 'jpeg', 'webp'],
+    help: '워터마크·크레딧. 품질과 출력 포맷(JPEG/WebP)은 다운로드 화면에 있습니다. 원본(raw) 모드에는 적용되지 않습니다.',
+    keywords: ['워터마크', '크레딧'],
     describe: (s) => describeOps(s),
   },
   {
@@ -225,7 +225,7 @@ export const FIELDS: SettingField[] = [
     key: 'keepColorProfile',
     screen: 'storage',
     label: '색상 프로파일 유지',
-    help: 'ICC 프로파일을 남깁니다. 하드클린에서는 JPEG로 다시 인코딩하므로 의미가 없습니다.',
+    help: 'ICC 프로파일을 남깁니다. 하드클린에서는 캔버스로 다시 인코딩하므로 의미가 없습니다.',
     keywords: ['icc', '색상', '프로파일', '컬러'],
     describe: (s) => (s.keepColorProfile ? '유지' : '제거'),
   },

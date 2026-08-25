@@ -367,7 +367,7 @@ export const homeScreen: Screen = {
             <span class="m-ico">${icon('folder_down', 17)}</span>
             <span class="m-txt">
               <span class="m-ttl">다운로드</span>
-              <span class="m-sub" id="m-storage-sub">메타데이터 제거 방식 · 폴더 · 파일 이름</span>
+              <span class="m-sub" id="m-storage-sub">메타데이터 제거 방식 · 품질 · 출력 포맷 · 폴더 · 파일 이름</span>
             </span>
             <span class="m-val" id="m-storage-val">—</span>
             <span class="m-ch">${icon('chevron_right', 15)}</span>
@@ -376,7 +376,7 @@ export const homeScreen: Screen = {
             <span class="m-ico">${icon('sliders', 17)}</span>
             <span class="m-txt">
               <span class="m-ttl">저장 후처리</span>
-              <span class="m-sub">품질 · 포맷 · 워터마크 · 크레딧</span>
+              <span class="m-sub">워터마크 · 크레딧</span>
             </span>
             <span class="m-val" id="m-output-val">—</span>
             <span class="m-ch">${icon('chevron_right', 15)}</span>
