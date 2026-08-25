@@ -12,9 +12,15 @@
  */
 
 import { DEFAULTS, type Settings } from '../lib/storage';
+import { opsSummary } from '../lib/image-ops';
+
+/** 후처리 요약 — 화면·검색·홈 배지가 같은 문장을 쓰도록 여기 한 번만 정의한다. */
+function describeOps(s: Settings): string {
+  return opsSummary(s.imageOps) || '없음';
+}
 
 /** 이 항목이 사는 화면 — 검색 결과에서 바로 이동하는 데 쓴다 */
-export type ScreenId = 'batch' | 'safety' | 'storage' | 'discord' | 'about' | 'home';
+export type ScreenId = 'batch' | 'safety' | 'storage' | 'output' | 'discord' | 'about' | 'home';
 
 export type RiskLevel = 'ok' | 'warn' | 'danger';
 
@@ -157,6 +163,65 @@ export const FIELDS: SettingField[] = [
     describe: (s) => s.filenameTemplate,
   },
   {
+    key: 'conflictAction',
+    screen: 'storage',
+    label: '이름 충돌 시',
+    help: '같은 파일명이 이미 있을 때의 동작입니다.',
+    keywords: ['덮어쓰기', '충돌', 'overwrite', 'conflict', '중복'],
+    describe: (s) =>
+      ({ uniquify: '번호 붙이기', overwrite: '덮어쓰기', prompt: '매번 묻기' })[s.conflictAction],
+    risk: (s) =>
+      s.conflictAction === 'overwrite'
+        ? { level: 'warn', message: '파일명이 겹치면 이전 이미지가 지워집니다.' }
+        : s.conflictAction === 'prompt'
+          ? { level: 'warn', message: '자동 배치 중에도 매번 저장 대화상자가 떠서 실행이 멈춥니다.' }
+          : { level: 'ok' },
+  },
+  {
+    key: 'writeManifest',
+    screen: 'storage',
+    label: '배치 매니페스트',
+    help: '배치 폴더에 프롬프트·시드 목록 CSV를 남깁니다.',
+    keywords: ['csv', '매니페스트', '목록', '재현', 'manifest'],
+    describe: (s) => (s.writeManifest ? '저장함' : '저장 안 함'),
+  },
+  {
+    key: 'cacheLimit',
+    screen: 'storage',
+    label: '원본 캐시 장수',
+    help: '"다시 저장"에 필요한 원본을 몇 장까지 보관할지 정합니다.',
+    keywords: ['캐시', '다시 저장', '복구', 'cache'],
+    describe: (s) => (s.cacheLimit > 0 ? `${s.cacheLimit}장` : '보관 안 함'),
+    risk: (s) =>
+      s.cacheLimit > 0
+        ? { level: 'ok' }
+        : { level: 'warn', message: '하드클린이 실패해도 다시 저장할 수 없습니다.' },
+  },
+  {
+    key: 'imageOps',
+    screen: 'output',
+    label: '저장 후처리',
+    help: '품질·포맷·워터마크·크레딧. 원본(raw) 모드에는 적용되지 않습니다.',
+    keywords: ['품질', '워터마크', '포맷', 'jpeg', 'webp'],
+    describe: (s) => describeOps(s),
+  },
+  {
+    key: 'autoResumeMin',
+    screen: 'safety',
+    label: 'Anlas 자동 재개',
+    help: 'Anlas 하한으로 일시정지한 뒤 자동으로 이어서 실행하기까지의 대기입니다.',
+    keywords: ['자동 재개', '충전', 'resume', '이어서'],
+    describe: (s) => (s.autoResumeMin > 0 ? `${s.autoResumeMin}분마다 확인` : '안 함'),
+  },
+  {
+    key: 'offerResume',
+    screen: 'safety',
+    label: '끊긴 배치 이어하기 제안',
+    help: '새로고침 등으로 끊긴 배치가 있으면 패널에서 이어하기를 제안합니다.',
+    keywords: ['이어하기', '복구', '새로고침', 'resume'],
+    describe: (s) => (s.offerResume ? '제안함' : '제안 안 함'),
+  },
+  {
     key: 'keepColorProfile',
     screen: 'storage',
     label: '색상 프로파일 유지',
@@ -233,6 +298,7 @@ export const SCREEN_LABELS: Record<ScreenId, string> = {
   batch: '배치',
   safety: '안전 설정',
   storage: '다운로드',
+  output: '저장 후처리',
   discord: '알림',
   about: '정보',
 };

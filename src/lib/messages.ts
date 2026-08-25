@@ -6,7 +6,7 @@
  * 어긋났다. 앞으로 새 메시지를 추가할 때는 반드시 아래 MessageMap에 먼저 등록할 것.
  */
 
-import type { DownloadMode } from './storage';
+import type { ConflictAction, DownloadMode, ImageOps } from './storage';
 
 // ---------------------------------------------------------------------------
 // 페이로드 / 응답 타입
@@ -31,14 +31,58 @@ export interface DownloadPayload {
   /** 확장자를 뺀 파일명 */
   filename: string;
   strip: { keepIccp: boolean };
+  /** 파일명 충돌 시 동작. 생략하면 'uniquify' */
+  conflictAction?: ConflictAction;
+  /**
+   * 저장 직전 후처리. 생략하거나 기본값이면 후처리 패스를 건너뛴다.
+   * raw 모드에는 적용되지 않는다 (both의 _raw 사본에도 마찬가지).
+   */
+  imageOps?: ImageOps;
+}
+
+/** 저장된 파일 하나 — 폴더 열기·재시도에 필요한 downloadId를 항상 함께 돌려준다. */
+export interface SavedItem {
+  path: string;
+  /** chrome.downloads가 부여한 id. 요청 자체가 거부됐으면 null */
+  downloadId: number | null;
+  /**
+   * downloads.onChanged로 **실제 완료를 확인한** 결과.
+   * 예전에는 download() 호출만 하고 성공으로 간주해서, 디스크가 차거나 경로가 막혀
+   * interrupted로 끝나도 패널에 "저장됨"이 찍혔다.
+   */
+  ok: boolean;
+  /** 실패 사유 (interrupted reason 등) */
+  error?: string;
+  /** 실제로 디스크에 쓰인 바이트 (확인 가능할 때만) */
+  bytes?: number;
 }
 
 export interface DownloadResponse {
+  /** 하위 호환 — 성공한 파일 경로만. 새 코드는 items를 쓸 것. */
   saved: string[];
+  items?: SavedItem[];
   errors?: string[];
   stripStatus?: StripStatusReport;
+  /** 후처리가 실제로 한 일 (크기 조정·품질 조정 등). 없으면 후처리를 안 했다는 뜻. */
+  opsNote?: string;
   /** 핸들러 자체가 실패한 경우 */
   error?: string;
+}
+
+/** 저장된 파일을 탐색기에서 보여준다 (chrome.downloads.show). */
+export interface ShowFilePayload {
+  downloadId: number;
+}
+
+/**
+ * 배치 매니페스트 — 클린 저장은 이미지에서 생성 정보를 지우므로, 재현에 필요한 정보를
+ * 파일 밖 CSV 한 개로 남긴다. 배치가 끝날 때 한 번만 저장된다.
+ */
+export interface ManifestPayload {
+  folder: string;
+  /** 확장자를 뺀 파일명 */
+  name: string;
+  csv: string;
 }
 
 export interface WebhookPayload {
@@ -61,6 +105,13 @@ export interface NotifyPayload {
   title: string;
   message: string;
   kind: 'done' | 'error' | 'anlasFloor';
+  /**
+   * 알림에 붙일 버튼. chrome.notifications는 최대 2개까지 지원한다.
+   * openFolder는 downloadId가 있을 때만 의미가 있고, retry는 NAI 탭으로 배치 재시도를 보낸다.
+   */
+  actions?: Array<'openFolder' | 'retry'>;
+  /** actions에 openFolder가 있을 때 열어 줄 파일 */
+  downloadId?: number;
 }
 
 /** 배치 진행 상태 — 팝업이 실행 중 화면을 그리는 데 쓴다 (B04) */
@@ -160,6 +211,10 @@ export interface MessageMap {
   'naisu.power': { payload: PowerPayload; response: OkResponse };
   /** 저장된 파일들을 일괄 클린 (N09) */
   'naisu.strip.files': { payload: StripFilesPayload; response: StripFilesResponse };
+  /** 저장된 파일을 탐색기에서 열기 */
+  'naisu.download.show': { payload: ShowFilePayload; response: OkResponse };
+  /** 배치 매니페스트(CSV) 저장 */
+  'naisu.download.manifest': { payload: ManifestPayload; response: OkResponse };
 
   'naisu.query.anlas': { payload: undefined; response: AnlasQueryResponse };
   'naisu.batch.start': { payload: { count?: number } | undefined; response: OkResponse };
@@ -174,6 +229,13 @@ export interface MessageMap {
   'naisu.selfcheck': { payload: undefined; response: SelfCheckResponse };
   /** 이력의 프롬프트를 NAI 입력란에 채우기 (U10) */
   'naisu.prompt.fill': { payload: PromptFillPayload; response: OkResponse };
+  /** 결과 줄의 "이 시드로 다시" — NAI 시드 입력란에 값을 되돌려 넣는다 */
+  'naisu.seed.fill': { payload: { seed: number }; response: OkResponse };
+  /**
+   * 설정 화면 열기. content script(novelai.net 오리진)에는 chrome.runtime.openOptionsPage가
+   * 없어(확장 페이지 전용 API) background가 대신 호출한다.
+   */
+  'naisu.options.open': { payload: undefined; response: OkResponse };
 }
 
 export type MessageType = keyof MessageMap;

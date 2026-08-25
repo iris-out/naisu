@@ -82,44 +82,95 @@
 .naisu-panel.collapsed .np-b{display:none}
 .naisu-panel.collapsed{box-shadow:2px 2px 0 var(--naisu-r)}
 
-/* 컨트롤 한 줄 — 장수·실행·저장·중단을 전부 한 줄에 (기능은 그대로, 세로 공간만 압축) */
-.np-row.count-row{
-  display:grid;
-  grid-template-columns:44px 1fr 32px 32px;
-  gap:5px;align-items:center;
+/* ===========================================================================
+   A안 — 상태 칩 · 실행 · 저장/중단 두 줄
+   예전에는 장수·실행·저장·중단이 280px 한 줄에 다 들어가 있어서, 저장과 중단이
+   아이콘만 남고(툴팁을 띄워야 뜻을 알 수 있었다) 실행 버튼도 좁았다.
+   지금은 실행이 한 줄을 거의 다 쓰고, 저장·중단은 이름을 되찾아 두 번째 줄로 내려간다.
+   =========================================================================== */
+
+.np-chips{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:4px;margin-bottom:7px;overflow:hidden}
+.np-chip{
+  display:flex;flex-direction:column;gap:1px;min-width:0;overflow:hidden;
+  background:var(--naisu-surface);border:1.5px solid var(--naisu-fg);color:var(--naisu-fg);
+  padding:4px 6px;font:inherit;text-align:left;cursor:pointer;
+  transition-property:background-color,border-color,transform;transition-duration:110ms;
 }
-.np-row.count-row > input.count{
+.np-chip:hover{background:var(--naisu-hover)}
+.np-chip:active{transform:scale(.97)}
+.np-chip:focus-visible{outline:2px solid var(--naisu-r);outline-offset:2px}
+.np-chip .k{
+  font-size:8px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;
+  color:var(--naisu-mid);line-height:1.2;
+}
+.np-chip .v{
+  font-size:11.5px;font-weight:700;line-height:1.25;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+  min-width:0;max-width:100%;
+}
+/* 저장 방식 칩만 강조 — 세 개 중 잘못 두면 실제로 곤란해지는 건 이것 하나다 */
+.np-chip[data-chip="mode"]{border-color:var(--naisu-r)}
+.np-chip[data-chip="mode"] .v{color:var(--naisu-r)}
+
+/* ⚙ — 레일 모드에서만 보인다 (카드에서는 칩 3개가 그 역할을 한다).
+   `#naisu-root button{display:inline-flex}`(특정도 1,0,1)를 이기려면 여기도 id를 붙여야 한다. */
+#naisu-root .np-gear{
+  display:none;align-items:center;justify-content:center;
+  background:var(--naisu-surface);border:1.5px solid var(--naisu-fg);color:var(--naisu-fg);
+  min-height:30px;cursor:pointer;
+}
+.np-gear:hover{background:var(--naisu-hover)}
+.np-gear:focus-visible{outline:2px solid var(--naisu-r);outline-offset:2px}
+
+.np-row.main-row{display:grid;grid-template-columns:46px 1fr;gap:5px;align-items:center}
+.np-row.save-row{display:grid;grid-template-columns:1fr 28px 32px;gap:5px;align-items:center;margin-top:5px}
+
+.np-row.main-row > input.count{
   background:var(--naisu-bg);border:2px solid var(--naisu-fg);color:var(--naisu-fg);
   padding:5px 4px;font:inherit;font-size:14px;font-weight:800;text-align:center;
   font-variant-numeric:tabular-nums;width:100%;min-height:32px;
 }
-.np-row.count-row > input.count:focus-visible{outline:2px solid var(--naisu-r);outline-offset:2px}
-.np-row.count-row > input.count:focus{outline:none;border-color:var(--naisu-r)}
+.np-row.main-row > input.count:focus-visible{outline:2px solid var(--naisu-r);outline-offset:2px}
+.np-row.main-row > input.count:focus{outline:none;border-color:var(--naisu-r)}
 
 /* 눌리는 하드섀도우 버튼 — 컨테이너 자체(각진 하드섀도우)의 언어를 버튼 하나하나로 확장 */
-.np-row.count-row > button{
+.np-row.main-row > button,
+.np-row.save-row > button{
   background:var(--naisu-bg);border:2px solid var(--naisu-fg);color:var(--naisu-fg);
-  padding:6px 0;font:inherit;font-size:12.5px;font-weight:800;cursor:pointer;
+  padding:6px 4px;font:inherit;font-size:12.5px;font-weight:800;cursor:pointer;
   white-space:nowrap;min-height:32px;
   box-shadow:2px 2px 0 var(--naisu-fg);
   transition-property:transform,box-shadow,background-color,color;
   transition-duration:110ms;transition-timing-function:cubic-bezier(.2,.8,.2,1);
 }
-.np-row.count-row > button:hover:not(:disabled){transform:translate(-1px,-1px);box-shadow:3px 3px 0 var(--naisu-fg)}
-.np-row.count-row > button:active:not(:disabled){transform:translate(2px,2px);box-shadow:0 0 0 var(--naisu-fg)}
-.np-row.count-row > button:focus-visible{outline:2px solid var(--naisu-r);outline-offset:2px}
+.np-row.main-row > button:hover:not(:disabled),
+.np-row.save-row > button:hover:not(:disabled){transform:translate(-1px,-1px);box-shadow:3px 3px 0 var(--naisu-fg)}
+.np-row.main-row > button:active:not(:disabled),
+.np-row.save-row > button:active:not(:disabled){transform:translate(2px,2px);box-shadow:0 0 0 var(--naisu-fg)}
+.np-row.main-row > button:focus-visible,
+.np-row.save-row > button:focus-visible{outline:2px solid var(--naisu-r);outline-offset:2px}
 
-.np-row.count-row > button.pri{background:var(--naisu-fg);color:var(--naisu-bg);box-shadow:2px 2px 0 var(--naisu-r)}
-.np-row.count-row > button.pri:hover{transform:translate(-1px,-1px);box-shadow:3px 3px 0 var(--naisu-r)}
-.np-row.count-row > button.pri:active{transform:translate(2px,2px);box-shadow:0 0 0 var(--naisu-r)}
-.np-row.count-row > button.r{border-color:var(--naisu-r);color:var(--naisu-r);box-shadow:2px 2px 0 var(--naisu-r)}
-.np-row.count-row > button:disabled{opacity:.35;cursor:not-allowed;box-shadow:none;transform:none}
+.np-row.main-row > button.pri{background:var(--naisu-fg);color:var(--naisu-bg);box-shadow:2px 2px 0 var(--naisu-r);font-size:13.5px;min-height:36px}
+.np-row.main-row > button.pri:hover{transform:translate(-1px,-1px);box-shadow:3px 3px 0 var(--naisu-r)}
+.np-row.main-row > button.pri:active{transform:translate(2px,2px);box-shadow:0 0 0 var(--naisu-r)}
+.np-row.save-row > button.r{border-color:var(--naisu-r);color:var(--naisu-r);box-shadow:2px 2px 0 var(--naisu-r)}
+.np-row.main-row > button:disabled,
+.np-row.save-row > button:disabled{opacity:.35;cursor:not-allowed;box-shadow:none;transform:none}
 
-/* 저장/중단 — 아이콘만 (title 툴팁으로 이름을 달아 눌러보지 않아도 알 수 있게) */
-.np-row.count-row > button.icon{
-  padding:0;font-size:14px;line-height:1;
-  display:flex;align-items:center;justify-content:center;
+/* 저장 버튼과 그 옆 ▾ 는 한 덩어리로 읽혀야 한다 — 사이 간격을 없애고 경계선만 남긴다 */
+.np-row.save-row{gap:0 5px}
+.np-row.save-row > button.dl{border-right-width:1px}
+.np-row.save-row > button.dl-more{border-left-width:1px;margin-left:-5px;padding:0;box-shadow:2px 2px 0 var(--naisu-fg)}
+.np-row.save-row > button.stop{padding:0}
+
+/* 헤더 ⋯ — 자주 쓰지 않는 것들(로그·진단)이 들어간 자리 */
+.np-h .more{
+  background:transparent;border:1px solid var(--naisu-on-fg-line);color:var(--naisu-on-fg);
+  padding:3px 6px;font:inherit;cursor:pointer;display:inline-flex;align-items:center;
+  transition-property:background-color,color;transition-duration:110ms;
 }
+.np-h .more:hover{background:var(--naisu-on-fg);color:var(--naisu-fg)}
+.np-h .more:focus-visible{outline:2px solid var(--naisu-r);outline-offset:2px}
 
 /* 놓치면 안 되는 실패/경고 배너 — 화면 상단 중앙, 패널과 별개로 항상 보임 */
 .naisu-alerts{
@@ -186,7 +237,8 @@
 .np-log.expanded{max-height:280px;resize:vertical}
 /* 로그가 비어 있으면 평소엔 상자를 숨기지만(.np-log:empty), 펼치기를 눌렀을 때는
    아무 반응이 없는 것처럼 보이면 안 되므로 빈 상자와 안내 문구를 보여 준다. */
-.np-log.expanded:empty{display:block;min-height:80px}
+.np-log[hidden]{display:none}
+.np-log.expanded:not([hidden]):empty{display:block;min-height:80px}
 .np-log.expanded:empty::before{
   content:'아직 로그가 없습니다 — 실행하거나 저장하면 여기에 기록됩니다';
   color:var(--naisu-faint);font-size:11.5px;
@@ -309,8 +361,8 @@
 
 /* 로그 — 레일 폭에는 못 들어가므로, 펼치면 레일 옆에 떠서 보인다 */
 .rail .np-log{display:none}
-.rail .np-log.expanded,
-.rail .np-log.expanded:empty{
+.rail .np-log.expanded:not([hidden]),
+.rail .np-log.expanded:not([hidden]):empty{
   display:block;position:absolute;right:calc(100% + 8px);bottom:0;
   width:230px;max-height:220px;margin:0;
   background:var(--naisu-surface);border:2px solid var(--naisu-fg);
@@ -335,8 +387,11 @@
   max-width:100%;font-size:8.5px;text-overflow:ellipsis;overflow:hidden;white-space:nowrap;
 }
 
-/* 레일에는 접기가 없다 — 56px에서 더 줄일 게 없고 상태만 늘어난다 */
-#naisu-root.rail .np-h-actions{display:none}
+/* 레일에는 접기가 없다 — 56px에서 더 줄일 게 없고 상태만 늘어난다.
+   다만 ⋯(더보기)는 남긴다: 로그 보기·진단 정보 복사·설정 열기로 가는 유일한 입구라,
+   같은 컨테이너에 있다는 이유로 함께 숨기면 레일에서는 그 기능들에 도달할 수 없다. */
+#naisu-root.rail .np-h-actions{display:flex;justify-content:center;width:100%;margin-top:2px}
+#naisu-root.rail .np-h-actions .toggle{display:none}
 
 /* ===========================================================================
    접힘 상태 알림 pill — 화면 상단 중앙에서 아래로 내려왔다 2초 뒤 사라진다
@@ -361,3 +416,155 @@
   to{opacity:1;transform:translateY(0) scale(1)}
 }
 @media (prefers-reduced-motion:reduce){.np-toast.in{animation-duration:.01ms}}
+
+
+/* ===========================================================================
+   이어하기 제안 — "처리될 때까지 자리를 지키는" 알림이다. 배너(.naisu-alert)는
+   시간이 지나면 사라지므로, 사용자가 무언가 해야 하는 일에는 쓰지 않는다.
+   =========================================================================== */
+.np-resume{
+  display:flex;align-items:center;gap:6px;margin-top:6px;
+  padding:5px 7px;font-size:11px;font-weight:700;line-height:1.4;
+  border:1.5px solid var(--naisu-fg);background:var(--naisu-surface);color:var(--naisu-fg);
+}
+.np-resume[hidden]{display:none}
+.np-resume .txt{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.np-resume button{
+  flex:none;background:transparent;border:1px solid currentColor;color:inherit;
+  padding:2px 6px;font:inherit;font-size:10.5px;font-weight:700;cursor:pointer;
+}
+.np-resume button:hover{background:currentColor;color:var(--naisu-bg)}
+.np-resume button:focus-visible{outline:2px solid var(--naisu-r);outline-offset:2px}
+.np-resume .dismiss{padding:2px 5px;border-color:var(--naisu-soft);color:var(--naisu-mid)}
+
+/* ===========================================================================
+   팝오버 — 상태 칩 / 저장 메뉴 / 더보기가 함께 쓰는 하나의 면
+   패널 루트(position:fixed) 기준 절대 좌표로 뜬다. 위치 계산은 panel-popover.ts.
+   =========================================================================== */
+.np-pop{
+  position:absolute;z-index:10;
+  width:250px;max-width:calc(100vw - 24px);
+  background:var(--naisu-bg);border:2px solid var(--naisu-fg);
+  box-shadow:3px 3px 0 var(--naisu-r);
+  padding:8px;font-size:12px;color:var(--naisu-fg);
+  max-height:min(70vh,420px);overflow:auto;
+}
+.np-pop[hidden]{display:none}
+.np-pop .pop-sec{
+  font-size:8.5px;font-weight:800;letter-spacing:.12em;text-transform:uppercase;
+  color:var(--naisu-mid);margin:2px 0 5px;
+}
+.np-pop .pop-sec:not(:first-child){margin-top:11px}
+
+.np-pop .pop-seg{display:grid;grid-template-columns:repeat(4,1fr);gap:0}
+.np-pop .pop-seg > button{
+  background:var(--naisu-bg);border:1.5px solid var(--naisu-fg);margin-left:-1.5px;
+  color:var(--naisu-fg);padding:5px 2px;font:inherit;font-size:10.5px;font-weight:700;
+  cursor:pointer;white-space:nowrap;
+}
+.np-pop .pop-seg > button:first-child{margin-left:0}
+.np-pop .pop-seg > button:hover{background:var(--naisu-hover)}
+.np-pop .pop-seg > button.on{background:var(--naisu-fg);color:var(--naisu-bg);position:relative;z-index:1}
+.np-pop .pop-seg > button:focus-visible{outline:2px solid var(--naisu-r);outline-offset:1px;position:relative;z-index:2}
+.np-pop .pop-help{
+  margin-top:5px;font-size:10.5px;line-height:1.5;color:var(--naisu-mid);
+  min-height:2.9em;
+}
+
+.np-pop .pop-field{display:flex;flex-direction:column;gap:3px;margin-bottom:6px}
+.np-pop .pop-field .k{
+  font-size:9px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--naisu-mid);
+}
+.np-pop .pop-field input{
+  background:var(--naisu-surface);border:1.5px solid var(--naisu-fg);color:var(--naisu-fg);
+  padding:5px 6px;font:inherit;font-size:11.5px;width:100%;
+}
+.np-pop .pop-field input:focus{outline:none;border-color:var(--naisu-r);background:var(--naisu-r-tint)}
+
+.np-pop .pop-tokens{display:flex;flex-wrap:wrap;gap:3px;margin-top:2px}
+.np-pop .pop-tokens > button{
+  background:var(--naisu-surface);border:1px solid var(--naisu-soft);color:var(--naisu-mid);
+  padding:2px 5px;font:inherit;font-size:10px;font-family:var(--naisu-font);cursor:pointer;
+}
+.np-pop .pop-tokens > button:hover{border-color:var(--naisu-fg);color:var(--naisu-fg)}
+.np-pop .pop-tokens > button:focus-visible{outline:2px solid var(--naisu-r);outline-offset:1px}
+
+.np-pop .pop-menu{display:flex;flex-direction:column;gap:1px}
+/* ⚠ id를 붙이지 않으면 아래쪽 `#naisu-root button{display:inline-flex;justify-content:center}`
+   (특정도 1,0,1)에 밀려 메뉴가 통째로 가운데 정렬된다 — 2026-08-24 실제 NAI 화면에서 재발. */
+#naisu-root .np-pop .pop-menu > button{
+  display:grid;grid-template-columns:16px 1fr;gap:8px;align-items:center;justify-items:start;
+  background:transparent;border:0;color:var(--naisu-fg);
+  padding:7px 8px;font:inherit;font-size:11.5px;text-align:left;cursor:pointer;width:100%;
+}
+/* 아이콘이 없는 항목도 라벨이 같은 열에서 시작하도록 첫 칸을 비워 둔다 */
+#naisu-root .np-pop .pop-menu > button > .lbl:first-child{grid-column:2}
+.np-pop .pop-menu > button:hover:not(:disabled){background:var(--naisu-hover)}
+.np-pop .pop-menu > button:focus-visible{outline:2px solid var(--naisu-r);outline-offset:-2px}
+.np-pop .pop-menu > button:disabled{opacity:.4;cursor:not-allowed}
+.np-pop .pop-menu > button.danger{color:var(--naisu-r)}
+.np-pop .pop-menu > button .ic{display:flex;color:var(--naisu-mid);justify-self:center}
+.np-pop .pop-menu > button .lbl{
+  display:flex;flex-direction:column;gap:1px;min-width:0;width:100%;
+  align-items:flex-start;text-align:left;
+}
+.np-pop .pop-menu > button .lbl .t{font-weight:600;text-align:left}
+.np-pop .pop-menu > button .lbl .h{
+  font-size:10px;color:var(--naisu-mid);line-height:1.35;text-align:left;
+  overflow:hidden;text-overflow:ellipsis;
+}
+.np-pop .pop-sep{height:1px;background:var(--naisu-soft);margin:3px 0}
+
+/* ===========================================================================
+   레일 모드에서의 A안 요소
+   레일의 컴팩트함(56px)은 그대로 두고, 칩 세 개는 ⚙ 하나로 접는다.
+   설정 자체는 사라지지 않고 팝오버 안에서 한 번에 다뤄진다(quickSettingsContent 'all').
+   =========================================================================== */
+.rail .np-chips{grid-template-columns:1fr;gap:4px;margin-bottom:5px}
+#naisu-root.rail .np-chip{display:none}
+#naisu-root.rail .np-gear{display:inline-flex}
+.rail .np-row.main-row{grid-template-columns:1fr;gap:4px}
+.rail .np-row.main-row > input.count{font-size:13px;min-height:30px;padding:4px 2px}
+.rail .np-row.main-row > button.pri{min-height:32px;font-size:12px;padding:0}
+/* 레일에서는 저장 버튼들을 세로로 쌓는다.
+   56px을 ⭳ | ▾ 로 가로 분할하면 버튼 하나가 ~23px이라 사실상 못 누른다(2026-08-24 보고).
+   카드 모드에서 ⭳ 와 ▾ 를 한 덩어리로 붙이던 음수 마진·경계선 처리도 여기서 되돌린다. */
+.rail .np-row.save-row{grid-template-columns:1fr;gap:4px;margin-top:4px}
+.rail .np-row.save-row > button{min-height:32px;padding:0}
+.rail .np-row.save-row > button.dl{border-right-width:2px}
+.rail .np-row.save-row > button.dl-more{margin-left:0;border-left-width:2px;min-height:26px}
+.rail .np-resume{font-size:10px;padding:4px 5px;gap:4px}
+.rail .np-resume .txt{display:none}
+.rail .np-resume button{width:100%}
+/* 팝오버는 레일 옆으로 나온다 — 56px 안에 들어갈 수 없으므로 폭을 따로 준다 */
+.rail .np-pop{width:230px}
+
+/* 그리드 선택 저장 팝오버 */
+.np-pop .pop-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:5px;margin-bottom:8px}
+.np-pop .pop-cell{
+  position:relative;display:block;aspect-ratio:1;cursor:pointer;
+  border:2px solid var(--naisu-fg);overflow:hidden;background:var(--naisu-hover);
+}
+.np-pop .pop-cell img{width:100%;height:100%;object-fit:cover;display:block}
+.np-pop .pop-cell input{
+  position:absolute;left:4px;top:4px;margin:0;width:15px;height:15px;
+  accent-color:var(--naisu-r);cursor:pointer;
+}
+.np-pop .pop-cell .idx{
+  position:absolute;right:0;bottom:0;background:var(--naisu-fg);color:var(--naisu-bg);
+  font-size:9.5px;font-weight:800;padding:1px 4px;font-variant-numeric:tabular-nums;
+}
+.np-pop .pop-cell.off{opacity:.4}
+.np-pop .pop-cell.off img{filter:grayscale(1)}
+.np-pop .pop-cell:focus-within{outline:2px solid var(--naisu-r);outline-offset:2px}
+
+.np-pop .pop-actions{display:flex;gap:4px;align-items:center}
+.np-pop .pop-actions > button{
+  background:var(--naisu-bg);border:2px solid var(--naisu-fg);color:var(--naisu-fg);
+  padding:5px 8px;font:inherit;font-size:11px;font-weight:800;cursor:pointer;white-space:nowrap;
+}
+.np-pop .pop-actions > button.pri{flex:1;background:var(--naisu-fg);color:var(--naisu-bg)}
+.np-pop .pop-actions > button.ghost{border-color:var(--naisu-soft);color:var(--naisu-mid);font-weight:600}
+.np-pop .pop-actions > button:hover:not(:disabled){transform:translate(-1px,-1px);box-shadow:2px 2px 0 var(--naisu-r)}
+.np-pop .pop-actions > button:disabled{opacity:.35;cursor:not-allowed}
+.np-pop .pop-actions > button:focus-visible{outline:2px solid var(--naisu-r);outline-offset:2px}

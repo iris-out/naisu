@@ -221,6 +221,42 @@ export async function ensureRandomSeed(seedBtn: HTMLButtonElement): Promise<Seed
  * 바이트를 못 받아왔다"(blob URL이 이미 revoke됐거나 레이스)는 가능성이 있어서, 이
  * 단계에서 실제로 뭘 받았는지 페이지 콘솔에 남긴다.
  */
+/**
+ * 시드를 NAI 입력란에 되돌려 넣는다 — 결과 줄의 "이 시드로 다시".
+ *
+ * ensureRandomSeed()와 정확히 대칭인 동작이다. 시드 버튼을 누르면 입력란이 열리고,
+ * 거기에 값을 써 넣은 뒤 blur하면 NAI가 고정 시드로 받아들인다. React 제어형 입력이라
+ * 네이티브 setter를 우회하는 setReactInputValue를 반드시 거쳐야 리렌더에 반영된다.
+ *
+ * @returns 성공하면 true. 실패는 조용히 삼키지 않고 console.warn + false.
+ */
+export async function setSeedValue(seedBtn: HTMLButtonElement, seed: number): Promise<boolean> {
+  seedBtn.click();
+  await new Promise((r) => setTimeout(r, 80));
+  const active = document.activeElement as HTMLElement | null;
+  const inp =
+    active instanceof HTMLInputElement
+      ? active
+      : document.querySelector<HTMLInputElement>(
+          'input[type="number"]:not([readonly]), input[type="text"]:not([readonly])',
+        );
+  if (!inp) {
+    console.warn(`[naisu] setSeedValue: 시드 입력란을 찾지 못했습니다 — ${describeSeedArea(seedBtn)}`);
+    return false;
+  }
+  setReactInputValue(inp, String(seed));
+  inp.blur();
+  await new Promise((r) => setTimeout(r, 80));
+  const after = seedBtn.textContent?.trim() ?? '';
+  if (!after.includes(String(seed))) {
+    console.warn(
+      `[naisu] setSeedValue: 값을 넣었지만 시드 표시가 "${after}"입니다 (기대: ${seed}) — NAI가 값을 거부했을 수 있습니다`,
+    );
+    return false;
+  }
+  return true;
+}
+
 export async function blobUrlToBytes(url: string): Promise<Uint8Array> {
   let res: Response;
   try {

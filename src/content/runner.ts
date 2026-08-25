@@ -5,7 +5,21 @@
  * - 중단 지점은 배치 커서로 저장돼(N07) 새로고침·탭 이동 후에도 이어서 실행할 수 있다.
  */
 
-import { SEL, pickVisible, findGenerateButton, readAnlas, findSeedButton, filterMainGridImages } from './selectors';
+import {
+  SEL,
+  pickVisible,
+  findGenerateButton,
+  readAnlas,
+  findSeedButton,
+  filterMainGridImages,
+  ANLAS_FALLBACK_PER_ITEM,
+  parseAnlasCostFromGenerateButton,
+} from './selectors';
+
+// 패널이 실행 전 예상 비용을 그리려면 이 함수가 필요한데, overlay가 runner를 import하면
+// runner → overlay → runner 순환이 된다. 순수 DOM 읽기라 selectors.ts로 옮기고 여기서는
+// 기존 호출부(content/index.ts의 naisu.query.anlas 응답)를 위해 그대로 다시 내보낸다.
+export { parseAnlasCostFromGenerateButton };
 import { pmSetText, blobUrlToBytes, bytesToBase64, waitForNewImages, ensureRandomSeed } from './dom-helpers';
 import { getToast, ensureDisclaimerAccepted } from './overlay';
 import {
@@ -29,6 +43,7 @@ import { parseNaiWebP, summarize } from '../lib/nai-metadata';
 import { addHistoryEntry } from '../lib/history';
 import { postEvent } from '../lib/discord';
 import { sendMessage, trySendMessage, type RunState, type StripStatusReport } from '../lib/messages';
+import { cacheImage } from './image-cache';
 
 function setBadge(text: string, color = '#222222'): void {
   void trySendMessage('naisu.badge', { text, color });
@@ -110,38 +125,6 @@ function snapshotKnownImageSrcs(): Set<string> {
   return set;
 }
 
-/** 파싱 실패 시에만 쓰는 어림값 (832×1216, 23step 기준 실측) — B03 */
-const ANLAS_FALLBACK_PER_ITEM = 17;
-
-/**
- * Generate 버튼(findGenerateButton, "Generate ... Anlas" 텍스트를 가진 버튼) 안에 실제
- * 표시되는 단가를 파싱한다. NAI가 표기 형식을 바꾸면 실패할 수 있어 그 경우 null을
- * 반환하고, 호출부가 어림값으로 폴백하며 "어림"임을 로그에 남긴다.
- */
-export function parseAnlasCostFromGenerateButton(): number | null {
-  const text = findGenerateButton()?.textContent?.trim() ?? '';
-  if (!text) return null;
-
-  // ① "24 Anlas" 처럼 단어가 함께 있는 경우
-  const withWord = text.match(/([\d,]+)\s*Anlas/i);
-  if (withWord) {
-    const n = Number(withWord[1]!.replace(/,/g, ''));
-    if (Number.isFinite(n) && n > 0) return n;
-  }
-
-  // ② 실제 화면에서는 "Generate 1 Image  24⚡" 처럼 Anlas가 단어가 아니라 아이콘으로만
-  //    표시되는 경우가 있다. 이때 앞 숫자는 장수("1 Image"), 뒤 숫자가 가격이므로
-  //    마지막 숫자 토큰을 가격으로 본다.
-  const numbers = text.match(/[\d,]+/g);
-  if (numbers && numbers.length >= 2) {
-    const n = Number(numbers[numbers.length - 1]!.replace(/,/g, ''));
-    if (Number.isFinite(n) && n > 0) return n;
-  }
-
-  // 숫자가 하나뿐이면 그게 장수인지 가격인지 구분할 수 없다 — 추측하지 않고 실패로 둔다.
-  return null;
-}
-
 async function downloadGenerated(
   img: HTMLImageElement,
   settings: Settings,
@@ -150,7 +133,18 @@ async function downloadGenerated(
   idx: number,
   /** NAI가 한 번에 여러 장(최대 4장)을 그리드로 생성했을 때, 파일명 충돌을 피하려고 붙이는 접미사(예: "_g2") */
   gridSuffix = '',
-): Promise<{ saved: number; meta: ReturnType<typeof summarize>; error?: string; stripStatus?: StripStatusReport }> {
+): Promise<{
+  saved: number;
+  meta: ReturnType<typeof summarize>;
+  error?: string;
+  stripStatus?: StripStatusReport;
+  /** 결과 타임라인 줄에 실어 줄 값들 (폴더 열기 · 다시 저장에 필요) */
+  files?: Array<{ path: string; downloadId: number | null }>;
+  cacheId?: string;
+  opsNote?: string;
+  /** 매니페스트 CSV 한 줄에 쓸 실제 저장 경로 */
+  primaryPath?: string;
+}> {
   const bytes = await blobUrlToBytes(img.src);
   const meta = parseNaiWebP(bytes);
   const s = summarize(meta);
@@ -189,6 +183,14 @@ async function downloadGenerated(
       batch: batchName,
       idx: idx + 1,
     }) + gridSuffix;
+  // 원본 바이트 캐시 — 배치 중 하드클린이 조용히 실패해도 나중에 다시 저장할 수 있게.
+  // 실패해도 배치를 막지 않는다(cacheImage 자체가 예외를 삼키고 false를 돌려준다).
+  const cacheId = `b${Date.now().toString(36)}-${idx}${gridSuffix}`;
+  const cached = await cacheImage(
+    { id: cacheId, bytes: bytes.slice().buffer, filename, seed: s.seed, model: s.model, prompt: s.prompt },
+    settings.cacheLimit,
+  );
+
   let resp: Awaited<ReturnType<typeof sendMessage<'naisu.download'>>> | undefined;
   try {
     resp = await sendMessage('naisu.download', {
@@ -197,15 +199,57 @@ async function downloadGenerated(
       folder,
       filename,
       strip: { keepIccp: settings.keepColorProfile },
+      conflictAction: settings.conflictAction,
+      imageOps: settings.imageOps,
     });
   } catch (e) {
-    return { saved: 0, meta: s, error: `다운로드 요청 실패: ${e}` };
+    return { saved: 0, meta: s, error: `다운로드 요청 실패: ${e}`, cacheId: cached ? cacheId : undefined };
   }
-  if (resp?.error) return { saved: 0, meta: s, error: String(resp.error), stripStatus: resp.stripStatus };
+  const files = (resp?.items ?? []).map((i) => ({ path: i.path, downloadId: i.downloadId }));
+  const common = {
+    meta: s,
+    stripStatus: resp?.stripStatus,
+    files,
+    cacheId: cached ? cacheId : undefined,
+    opsNote: resp?.opsNote,
+    primaryPath: resp?.saved?.[0],
+  };
+  if (resp?.error) return { saved: 0, error: String(resp.error), ...common };
   if (resp?.errors?.length) {
-    return { saved: resp.saved?.length ?? 0, meta: s, error: resp.errors.join('; '), stripStatus: resp.stripStatus };
+    return { saved: resp.saved?.length ?? 0, error: resp.errors.join('; '), ...common };
   }
-  return { saved: Array.isArray(resp?.saved) ? resp.saved.length : 0, meta: s, stripStatus: resp?.stripStatus };
+  return { saved: Array.isArray(resp?.saved) ? resp.saved.length : 0, ...common };
+}
+
+/**
+ * 배치 매니페스트 CSV.
+ *
+ * 클린/하드클린 저장은 이미지에서 프롬프트·시드를 지운다. 그건 의도된 동작이지만,
+ * 그 결과 "이 그림 어떻게 뽑았더라"를 되짚을 방법도 같이 사라진다.
+ * 매니페스트는 그 짝이다 — 재현 정보를 이미지 밖 파일 하나에 남긴다.
+ */
+interface ManifestRow {
+  idx: number;
+  path: string;
+  seed?: number;
+  model?: string;
+  sampler?: string;
+  steps?: number;
+  prompt: string;
+}
+
+function toCsv(rows: ManifestRow[]): string {
+  const esc = (v: unknown): string => {
+    const s = v === undefined || v === null ? '' : String(v);
+    // 프롬프트에는 쉼표·따옴표·줄바꿈이 흔하다 — RFC4180대로 감싸고 따옴표는 두 번 쓴다.
+    return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  };
+  const header = ['idx', 'file', 'seed', 'model', 'sampler', 'steps', 'prompt'];
+  const lines = [header.join(',')];
+  for (const r of rows) {
+    lines.push([r.idx, r.path, r.seed, r.model, r.sampler, r.steps, r.prompt].map(esc).join(','));
+  }
+  return lines.join('\r\n');
 }
 
 interface RunOptions {
@@ -299,6 +343,12 @@ async function runBatchCore(opts: RunOptions): Promise<void> {
 
   let done = startIdx;
   let savedFiles = 0;
+  /** 배치가 끝나면 CSV 한 개로 저장할 재현 정보 (Settings.writeManifest가 켜져 있을 때만) */
+  const manifestRows: ManifestRow[] = [];
+  /** 완료 알림의 "폴더 열기" 버튼이 열어 줄 파일 — 마지막으로 성공한 저장 */
+  let lastSavedDownloadId: number | null = null;
+  /** Anlas 하한 자동 재개를 다음에 확인할 시각 (autoResumeMin이 0이면 항상 null) */
+  let autoResumeAt: number | null = null;
   let retryStreak = 0;
   let stoppedBy: BatchReport['stoppedBy'] = 'complete';
   const failures: BatchFailure[] = [];
@@ -340,11 +390,34 @@ async function runBatchCore(opts: RunOptions): Promise<void> {
               if (settings.notifications.anlasFloor) {
                 void trySendMessage('naisu.notify', {
                   title: 'NAISU — Anlas 부족으로 일시정지',
-                  message: `Anlas ${anlas} — 하한(${settings.anlasFloor}) 아래로 떨어져 일시정지했습니다. 충전 후 패널에서 재개하세요.`,
+                  message:
+                    settings.autoResumeMin > 0
+                      ? `Anlas ${anlas} — 하한(${settings.anlasFloor}) 아래로 떨어졌습니다. ${settings.autoResumeMin}분마다 다시 확인해 자동으로 재개합니다.`
+                      : `Anlas ${anlas} — 하한(${settings.anlasFloor}) 아래로 떨어져 일시정지했습니다. 충전 후 패널에서 재개하세요.`,
                   kind: 'anlasFloor',
                 });
               }
+              // 자동 재개: 충전은 시간이 지나면 저절로 되는 일이라, 사람이 지켜보고 있다가
+              // 다시 눌러야 하는 건 낭비다. 다만 "지금 되나?"를 계속 두드리지 않도록
+              // 사용자가 정한 간격으로만 확인하고, 생성 간격 규칙은 그대로 지킨다.
+              if (settings.autoResumeMin > 0) {
+                autoResumeAt = Date.now() + settings.autoResumeMin * 60_000;
+                toast.log(`${settings.autoResumeMin}분 뒤 Anlas를 다시 확인해 자동 재개합니다`, 'info');
+              }
+            } else if (autoResumeAt !== null && Date.now() >= autoResumeAt) {
+              // 대기 시간이 지났다 — 지금 Anlas가 하한을 넘겼으면 스스로 재개한다.
+              const now = readAnlas();
+              if (now !== null && now >= settings.anlasFloor) {
+                active.paused = false;
+                autoResumeAt = null;
+                toast.setStatus('실행 중');
+                toast.log(`Anlas ${now} — 하한을 넘겨 자동 재개합니다`, 'good');
+                continue;
+              }
+              autoResumeAt = Date.now() + settings.autoResumeMin * 60_000;
             }
+            // 일시정지 상태에서 CPU를 태우지 않도록 잠깐 쉬었다 다시 확인한다
+            await sleep(2000, () => active!.stopped);
             continue;
           }
           toast.log(`Anlas 부족 (${anlas} < ${settings.anlasFloor}) — 중단`, 'bad');
@@ -409,6 +482,7 @@ async function runBatchCore(opts: RunOptions): Promise<void> {
 
         const results: Array<Awaited<ReturnType<typeof downloadGenerated>>> = [];
         for (let g = 0; g < imgs.length; g++) {
+          const label2 = isGrid ? `#${item.idx + 1}-${g + 1}/${imgs.length}` : `#${item.idx + 1}`;
           const r = await downloadGenerated(
             imgs[g],
             settings,
@@ -418,13 +492,25 @@ async function runBatchCore(opts: RunOptions): Promise<void> {
             isGrid ? `_g${g + 1}` : '',
           );
           results.push(r);
-          const label2 = isGrid ? `#${item.idx + 1}-${g + 1}/${imgs.length}` : `#${item.idx + 1}`;
           savedFiles += r.saved;
           if (r.error) {
             toast.log(`저장 실패 ${label2} — ${r.error}`, 'bad');
             failures.push({ idx: item.idx, prompt: item.prompt, reason: r.error, detail: r.stripStatus?.detail });
           } else {
             toast.log(`저장 완료 ${label2}${r.meta.seed ? ` · seed ${r.meta.seed}` : ''}`, 'good');
+            const okFile = r.files?.find((f) => f.downloadId !== null);
+            if (okFile?.downloadId != null) lastSavedDownloadId = okFile.downloadId;
+            if (r.primaryPath) {
+              manifestRows.push({
+                idx: item.idx + 1,
+                path: r.primaryPath,
+                seed: r.meta.seed,
+                model: r.meta.model,
+                sampler: r.meta.sampler,
+                steps: r.meta.steps,
+                prompt: item.prompt,
+              });
+            }
           }
           if (r.stripStatus) {
             toast.log(r.stripStatus.message, r.stripStatus.level);
@@ -554,11 +640,35 @@ async function runBatchCore(opts: RunOptions): Promise<void> {
       });
     } catch { /* SW 비활성 시 무시 */ }
 
+    // 매니페스트 — 클린 저장이 이미지에서 지운 재현 정보를 배치 폴더에 CSV로 남긴다.
+    if (settings.writeManifest && manifestRows.length > 0) {
+      const r = await trySendMessage('naisu.download.manifest', {
+        folder: batchFolder,
+        name: `${batchName}_manifest`,
+        csv: toCsv(manifestRows),
+      });
+      if (r?.ok) toast.log(`매니페스트 저장됨 — ${manifestRows.length}줄`, 'good');
+      else if (r) toast.log(`매니페스트 저장 실패 — ${r.reason ?? '알 수 없는 이유'}`, 'bad');
+    }
+
     if (stoppedBy === 'complete' && settings.notifications.done) {
+      // 알림에서 바로 폴더를 열 수 있게 마지막으로 저장된 파일의 id를 실어 보낸다.
+      const lastId = lastSavedDownloadId ?? undefined;
       void trySendMessage('naisu.notify', {
         title: 'NAISU — 배치 완료',
         message: `${done}/${total}장 완료 · ${Math.round(dur)}초 · ${usedAnlas} ₳ 사용`,
         kind: 'done',
+        actions: lastId !== undefined ? ['openFolder'] : undefined,
+        downloadId: lastId,
+      });
+    }
+
+    if (stoppedBy === 'error' && settings.notifications.error) {
+      void trySendMessage('naisu.notify', {
+        title: 'NAISU — 배치 중단(오류)',
+        message: `${done}/${total}장에서 멈췄습니다. 다시 시도하면 이어서 실행합니다.`,
+        kind: 'error',
+        actions: ['retry'],
       });
     }
 

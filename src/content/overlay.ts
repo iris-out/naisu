@@ -5,7 +5,7 @@
  */
 
 import { icon } from '../lib/icons';
-import { readAnlas } from './selectors';
+import { readAnlas, parseAnlasCostFromGenerateButton } from './selectors';
 import type { PanelLayout, PanelTheme } from '../lib/storage';
 import {
   getTemplate,
@@ -14,8 +14,25 @@ import {
   STORAGE_KEYS,
   isDisclaimerAccepted,
   acceptDisclaimer,
+  getBatchCursor,
+  clearBatchCursor,
 } from '../lib/storage';
 import { totalCount } from '../lib/prompt-variator';
+import {
+  closePopover,
+  gridPickerContent,
+  menuContent,
+  mountPopover,
+  openPopover,
+  quickSettingsContent,
+  saveMenuRows,
+  unmountPopover,
+  MENU_SEP,
+  MODE_LABEL,
+  type MenuRow,
+} from './panel-popover';
+import type { SaveOverride } from './panel-types';
+import { trySendMessage } from '../lib/messages';
 
 const ROOT_ID = 'naisu-root';
 const FONT_STYLE_ID = 'naisu-fonts';
@@ -118,8 +135,14 @@ export interface ToastApi {
   onStop(handler: () => void): void;
   /** 사용자가 ▶ 자동으로 클릭. count 인자는 패널 입력란의 값 */
   onStart(handler: (count: number) => void): void;
-  /** 사용자가 수동 저장 버튼 클릭 */
-  onManualDownload(handler: () => Promise<void>): void;
+  /**
+   * 사용자가 수동 저장 버튼 클릭.
+   * override는 ⭳ 옆 ▾ 메뉴에서 "이번 한 장만 원본으로" 같은 걸 골랐을 때만 채워진다.
+   */
+  onManualDownload(handler: (override?: SaveOverride) => Promise<void>): void;
+
+  /** 끊긴 배치 이어하기 제안 배너 */
+  onResume(handler: () => void): void;
 }
 
 let toastApi: ToastApi | null = null;
@@ -146,10 +169,19 @@ interface PanelEls {
   countHint: HTMLElement;
   // 수동
   btnManualDl: HTMLButtonElement;
+  btnManualMenu: HTMLButtonElement;
   log: HTMLElement;
-  // U02/U08/U09 유틸리티
-  logToggleBtn: HTMLButtonElement;
-  diagBtn: HTMLButtonElement;
+  // A안: 상태 칩 · 이어하기
+  btnMore: HTMLButtonElement;
+  chips: HTMLElement;
+  chipMode: HTMLButtonElement;
+  chipFolder: HTMLButtonElement;
+  chipName: HTMLButtonElement;
+  gear: HTMLButtonElement;
+  resumeBar: HTMLElement;
+  resumeText: HTMLElement;
+  btnResumeGo: HTMLButtonElement;
+  btnResumeDismiss: HTMLButtonElement;
 }
 
 let els: PanelEls | null = null;
@@ -157,7 +189,8 @@ let els: PanelEls | null = null;
 let pauseHandler: (() => void) | null = null;
 let stopHandler: (() => void) | null = null;
 let startHandler: ((count: number) => void) | null = null;
-let manualDlHandler: (() => Promise<void>) | null = null;
+let manualDlHandler: ((override?: SaveOverride) => Promise<void>) | null = null;
+let resumeHandler: (() => void) | null = null;
 let wasRunning = false;
 
 // ---------------------------------------------------------------------------
@@ -305,16 +338,28 @@ async function applyPanelLayout(): Promise<void> {
 const TOAST_MS = 2000;
 let toastTimer: number | undefined;
 
+/**
+ * 로그 상자가 지금 실제로 보이는가.
+ *
+ * ⚠ 예전에는 "카드 모드면 로그는 항상 보인다"고 가정하고 `return true`였다. A안에서 로그가
+ *   **기본 숨김**(⋯ 메뉴로 켬)이 되면서 이 가정이 깨졌고, 그 결과 카드 모드에서
+ *   토스트도 안 뜨고 로그도 안 보이는 **사각지대**가 생겼다 — 결과 줄이 안 만들어지는
+ *   메시지("저장할 이미지 없음" 등)가 통째로 사라졌다(2026-08-24 실제 NAI에서 보고).
+ *   클래스로 추론하지 말고 실제로 렌더됐는지를 본다: hidden / `:empty` / 레일 접힘이
+ *   전부 offsetParent 하나로 판정된다.
+ */
 function isLogVisible(): boolean {
   if (!els) return false;
   if (els.card.classList.contains('collapsed')) return false;
-  // 레일에서는 펼쳤을 때만 로그가 보인다
-  if (els.root.classList.contains('rail')) return els.log.classList.contains('expanded');
-  return true;
+  return els.log.offsetParent !== null;
 }
 
 function showToastLine(line: string, kind: 'info' | 'good' | 'bad'): void {
-  if (!els || isLogVisible()) return;
+  if (!els) return;
+  // 실패는 로그가 보이든 말든 항상 띄운다 — 흐르는 회색 로그 한 줄로는 놓치기 쉽고,
+  // 사용자가 기대하는 것도 "눈에 확 들어오는" 알림이다.
+  // 성공/정보는 로그가 이미 보이는 상황이면 중복이라 띄우지 않는다.
+  if (kind !== 'bad' && isLogVisible()) return;
   const el = els.toastLine;
   el.textContent = line;
   el.dataset.kind = kind;
@@ -338,6 +383,7 @@ function startWatchers(): void {
 }
 
 export function unmountPanel(): void {
+  unmountPopover();
   panel?.remove();
   panel = null;
   els = null;
@@ -346,6 +392,7 @@ export function unmountPanel(): void {
   stopHandler = null;
   startHandler = null;
   manualDlHandler = null;
+  resumeHandler = null;
   wasRunning = false;
   if (watcherTimer !== undefined) {
     clearTimeout(watcherTimer);
@@ -381,22 +428,35 @@ export function mountPanel(forceTopLeft = false): void {
           <span class="prog-mini">대기 중</span>
         </div>
         <div class="np-h-actions">
+          <button class="more" type="button" data-pop-anchor title="더보기" aria-label="더보기" aria-haspopup="menu">${icon('more', 14)}</button>
           <button class="toggle" type="button" title="접기" aria-expanded="true">${icon('chevron_down', 14)}</button>
         </div>
       </div>
       <div class="np-mini-bar"><span></span></div>
       <div class="np-b">
-        <div class="np-row count-row">
-          <input class="count" type="number" min="1" value="1" title="생성할 장수">
+        <div class="np-chips">
+          <button class="np-chip" type="button" data-chip="mode" data-pop-anchor aria-haspopup="dialog">
+            <span class="k">저장</span><span class="v">—</span>
+          </button>
+          <button class="np-chip" type="button" data-chip="folder" data-pop-anchor aria-haspopup="dialog">
+            <span class="k">폴더</span><span class="v">—</span>
+          </button>
+          <button class="np-chip" type="button" data-chip="name" data-pop-anchor aria-haspopup="dialog">
+            <span class="k">이름</span><span class="v">—</span>
+          </button>
+          <button class="np-gear" type="button" data-chip="all" data-pop-anchor title="저장 설정" aria-label="저장 설정" aria-haspopup="dialog">${icon('sliders', 14)}</button>
+        </div>
+        <div class="np-row main-row">
+          <input class="count" type="number" min="1" value="1" title="생성할 장수" aria-label="생성할 장수">
           <button class="pri" data-batch="startpause" data-action="start">${icon('play', 13)}<span class="btn-lbl">자동으로</span></button>
-          <button class="icon" data-manual="dl" title="현재 이미지 저장">${icon('download', 14)}</button>
-          <button class="icon r" data-batch="stop" title="중단" disabled aria-label="중단">${icon('square', 13)}</button>
+        </div>
+        <div class="np-row save-row">
+          <button class="dl" data-manual="dl" title="화면의 이미지를 지금 저장합니다">${icon('download', 13)}<span class="btn-lbl">이 이미지 저장</span></button>
+          <button class="dl-more" data-manual="menu" data-pop-anchor title="이번 한 장만 다른 방식으로" aria-label="저장 방식 고르기" aria-haspopup="menu">${icon('chevron_down', 12)}</button>
+          <button class="stop r" data-batch="stop" title="중단" disabled aria-label="중단">${icon('square', 13)}</button>
         </div>
         <div class="count-hint"></div>
-        <div class="np-row util-row">
-          <button class="log-toggle-btn" type="button" title="로그 영역을 넓게 펼칩니다" aria-label="로그 펼치기" aria-expanded="false"><span class="ic">${icon('maximize_2', 14)}</span><span class="btn-lbl">로그</span></button>
-          <button class="diag-btn" type="button" title="오류 문의용 진단 정보를 클립보드에 복사합니다" aria-label="진단 정보 복사">${icon('stethoscope', 14)}<span class="btn-lbl">진단</span></button>
-        </div>
+        <div class="np-resume" hidden><span class="txt"></span><button class="go" type="button">이어하기</button><button class="dismiss" type="button" aria-label="닫기">✕</button></div>
         <div class="np-log log" role="log" aria-live="polite" aria-label="실행 로그"></div>
       </div>
     </div>
@@ -424,10 +484,68 @@ export function mountPanel(forceTopLeft = false): void {
     countInput: $('.count') as HTMLInputElement,
     countHint: $('.count-hint'),
     btnManualDl: $('button[data-manual="dl"]') as HTMLButtonElement,
+    btnManualMenu: $('button[data-manual="menu"]') as HTMLButtonElement,
     log: $('.log'),
-    logToggleBtn: $('.log-toggle-btn') as HTMLButtonElement,
-    diagBtn: $('.diag-btn') as HTMLButtonElement,
+    btnMore: $('.more') as HTMLButtonElement,
+    chips: $('.np-chips'),
+    chipMode: $('[data-chip="mode"]') as HTMLButtonElement,
+    chipFolder: $('[data-chip="folder"]') as HTMLButtonElement,
+    chipName: $('[data-chip="name"]') as HTMLButtonElement,
+    gear: $('.np-gear') as HTMLButtonElement,
+    resumeBar: $('.np-resume'),
+    resumeText: $('.np-resume .txt'),
+    btnResumeGo: $('.np-resume .go') as HTMLButtonElement,
+    btnResumeDismiss: $('.np-resume .dismiss') as HTMLButtonElement,
   };
+
+  mountPopover(root);
+
+  // 상태 칩 — 누르면 그 항목만 담긴 팝오버가 열린다
+  const chipTargets: Array<[HTMLButtonElement, 'mode' | 'folder' | 'name' | 'all']> = [
+    [els.chipMode, 'mode'],
+    [els.chipFolder, 'folder'],
+    [els.chipName, 'name'],
+    [els.gear, 'all'],
+  ];
+  for (const [btn, field] of chipTargets) {
+    btn.addEventListener('click', () => {
+      openPopover(`chip:${field}`, btn, (body) => {
+        void quickSettingsContent(body, field, () => void refreshChips());
+      });
+    });
+  }
+
+  // ⭳ 옆 ▾ — 이번 한 장만 다른 방식으로
+  els.btnManualMenu.addEventListener('click', () => {
+    openPopover('save-menu', els!.btnManualMenu, (body, close) => {
+      void getSettings().then((s) => {
+        menuContent(
+          body,
+          saveMenuRows(s.downloadMode, (override) => void manualDlHandler?.(override)),
+          close,
+        );
+      });
+    });
+  });
+
+  // ⋯ 더보기 — 자주 쓰지 않는 것들이 사는 곳(로그·진단·캐시 등)
+  els.btnMore.addEventListener('click', () => {
+    openPopover('more', els!.btnMore, (body, close) => {
+      menuContent(body, buildMoreMenu(), close);
+    });
+  });
+
+  els.btnResumeGo.addEventListener('click', () => {
+    els!.resumeBar.hidden = true;
+    resumeHandler?.();
+  });
+  els.btnResumeDismiss.addEventListener('click', () => {
+    els!.resumeBar.hidden = true;
+    void clearBatchCursor();
+  });
+
+  void refreshChips();
+  void offerResumeIfPending();
 
   // 배치 컨트롤 (실행/일시정지/재개 통합)
   els.btnStartPause.addEventListener('click', () => {
@@ -472,35 +590,28 @@ export function mountPanel(forceTopLeft = false): void {
   els.countInput.addEventListener('input', () => {
     if (saveCountTimer) clearTimeout(saveCountTimer);
     saveCountTimer = setTimeout(flushCount, 400);
+    void refreshCountHint(); // 예상 Anlas·시간이 입력을 따라 즉시 움직이게
   });
   els.countInput.addEventListener('blur', flushCount);
 
   chrome.storage.onChanged.addListener((changes) => {
     if (changes[STORAGE_KEYS.templates]) void refreshCountHint();
-    if (changes[STORAGE_KEYS.settings]) void loadCountFromSettings();
+    if (changes[STORAGE_KEYS.settings]) {
+      void loadCountFromSettings();
+      // 팝업에서 저장 방식을 바꿔도 패널 칩이 즉시 따라가야 한다 — 두 곳이 어긋나면
+      // 칩이 보여 주는 값을 믿을 수 없게 되고, 칩을 만든 이유가 없어진다.
+      void refreshChips();
+    }
   });
 
   // 접기 토글
   els.toggle.addEventListener('click', () => {
+    closePopover(); // 접힌 패널 밖에 팝오버만 남아 떠 있는 상태를 막는다
     const collapsed = els!.card.classList.toggle('collapsed');
     els!.toggle.setAttribute('aria-expanded', String(!collapsed));
     els!.toggle.innerHTML = icon(collapsed ? 'chevron_up' : 'chevron_down', 14);
     scheduleAnlasUpdate(); // P02: 접힘 상태가 폴링 간격에 영향을 주므로 즉시 재계산
   });
-
-  // U02: 로그 펼치기/접기 (드래그 리사이즈는 CSS resize:vertical로 별도 제공)
-  els.logToggleBtn.addEventListener('click', () => {
-    const expanded = els!.log.classList.toggle('expanded');
-    els!.logToggleBtn.setAttribute('aria-expanded', String(expanded));
-    els!.logToggleBtn.title = expanded ? '로그 접기' : '로그 펼치기';
-    els!.logToggleBtn.setAttribute('aria-label', expanded ? '로그 접기' : '로그 펼치기');
-    const ic = els!.logToggleBtn.querySelector('.ic');
-    // 펼침/접힘은 방향이 아니라 "넓히기 / 좁히기"로 읽히는 편이 분명하다
-    if (ic) ic.innerHTML = icon(expanded ? 'minimize_2' : 'maximize_2', 14);
-  });
-
-  // U02: 진단 정보 복사
-  els.diagBtn.addEventListener('click', () => void copyDiagnostics());
 
   // U08: 패널 테마 — OS 다크 모드 설정을 그대로 따른다
   applyTheme();
@@ -611,12 +722,117 @@ export function mountPanel(forceTopLeft = false): void {
     onStop: (h) => (stopHandler = h),
     onStart: (h) => (startHandler = h),
     onManualDownload: (h) => (manualDlHandler = h),
+    onResume: (h) => (resumeHandler = h),
   };
 }
 
 export function getToast(): ToastApi {
   if (!toastApi) mountPanel();
   return toastApi!;
+}
+
+// ---------------------------------------------------------------------------
+// A안: 상태 칩 · 더보기 메뉴 · 이어하기 제안
+// ---------------------------------------------------------------------------
+
+/** 칩에 현재 값을 채운다. 설정이 어디서 바뀌든(팝업·팝오버·다른 탭) 여기 한 곳으로 모인다. */
+async function refreshChips(): Promise<void> {
+  if (!els) return;
+  const s = await getSettings();
+
+  const set = (btn: HTMLButtonElement, value: string, title: string): void => {
+    const v = btn.querySelector('.v');
+    if (v) v.textContent = value;
+    btn.title = title;
+  };
+  set(els.chipMode, MODE_LABEL[s.downloadMode], `저장 방식: ${MODE_LABEL[s.downloadMode]} — 눌러서 바꿉니다`);
+  const folder = [s.downloadFolder, s.batchFolderTemplate].filter(Boolean).join('/');
+  set(els.chipFolder, s.downloadFolder || '(기본)', `저장 폴더: ${folder || '(다운로드 폴더 바로 아래)'} — 눌러서 바꿉니다`);
+  set(els.chipName, s.filenameTemplate, `파일 이름: ${s.filenameTemplate} — 눌러서 바꿉니다`);
+}
+
+/**
+ * 그리드 선택 저장 팝오버를 띄우고 사용자가 고른 인덱스를 돌려준다.
+ * 취소·Esc·바깥 클릭이면 null — 호출부(content/index.ts)는 그때 아무것도 저장하지 않는다.
+ */
+export function pickGridImages(items: Array<{ src: string; label: string }>): Promise<number[] | null> {
+  return new Promise((resolve) => {
+    if (!els) {
+      resolve(null);
+      return;
+    }
+    // close()는 확인 후에도 호출되므로, onClose가 확인 결과를 null로 덮어쓰지 않게 표시해 둔다.
+    let confirmed = false;
+    openPopover(
+      'grid-pick',
+      els.btnManualDl,
+      (body, close) => {
+        gridPickerContent(
+          body,
+          items,
+          (indices) => {
+            confirmed = true;
+            close();
+            resolve(indices);
+          },
+          close,
+        );
+      },
+      () => {
+        if (!confirmed) resolve(null);
+      },
+    );
+  });
+}
+
+/** ⋯ 메뉴 구성 — 매번 새로 만든다(로그 표시 여부 등 상태가 라벨에 반영되어야 하므로). */
+function buildMoreMenu(): MenuRow[] {
+  const logVisible = els ? !els.log.hidden : false;
+  return [
+    {
+      label: logVisible ? '로그 숨기기' : '로그 보기',
+      iconName: 'scroll_text',
+      hint: '원문 실행 로그',
+      onPick: () => {
+        if (!els) return;
+        els.log.hidden = !els.log.hidden;
+        els.log.classList.toggle('expanded', !els.log.hidden);
+      },
+    },
+    {
+      label: '진단 정보 복사',
+      iconName: 'stethoscope',
+      hint: '오류 문의용',
+      onPick: () => void copyDiagnostics(),
+    },
+    MENU_SEP,
+    {
+      label: '설정 열기',
+      iconName: 'sliders',
+      hint: '전체 설정 화면',
+      onPick: () => void trySendMessage('naisu.options.open'),
+    },
+  ];
+}
+
+/**
+ * N07 연계 — 새로고침 등으로 끊긴 배치가 있으면 패널에서 바로 이어갈 수 있게 제안한다.
+ * 지금까지 배치 커서는 저장만 되고 사용자에게 보이는 자리가 없었다.
+ */
+async function offerResumeIfPending(): Promise<void> {
+  if (!els) return;
+  const s = await getSettings();
+  if (!s.offerResume) return;
+  const cursor = await getBatchCursor();
+  if (!cursor || cursor.nextIdx >= cursor.total) return;
+  const why: Record<string, string> = {
+    user: '사용자 중단',
+    anlas: 'Anlas 부족',
+    error: '오류',
+    unload: '탭 종료·새로고침',
+  };
+  els.resumeText.textContent = `중단된 배치 ${cursor.nextIdx}/${cursor.total}장 (${why[cursor.reason] ?? cursor.reason})`;
+  els.resumeBar.hidden = false;
 }
 
 function pad(n: number): string {
@@ -661,17 +877,42 @@ async function loadCountFromSettings(): Promise<void> {
   els.countInput.value = String(Math.max(1, settings.panelCount));
 }
 
+/**
+ * 장수 아래 보조 문구 — **실행 전 예상치**만 짧게 보여 준다.
+ *
+ * 예전에는 여기에 템플릿 전개 방식("시드만 변경 × 5 = 5장")과 단가를 못 읽었을 때의
+ * "(어림)" 표시까지 다 넣었는데, 매번 읽게 되는 자리에 설명이 길게 깔려 시끄러웠다.
+ * 템플릿 총량은 입력란 placeholder와 title(툴팁)에 그대로 남는다.
+ *
+ * Anlas 단가는 NAI가 Generate 버튼에 이미 계산해 둔 값을 그대로 읽는다(해상도·스텝·동시
+ * 생성 장수가 전부 반영되어 있다). **못 읽으면 아예 표시하지 않는다** — 어림값을 숫자로
+ * 보여 주면 사용자가 그걸 실제 비용으로 믿게 되고, 그 위에 세운 "Anlas 부족" 경고까지
+ * 틀리게 된다(실제 화면에서 잔량이 충분한데도 부족 경고가 떴다).
+ */
 async function refreshCountHint(): Promise<void> {
   if (!els) return;
   const t = await getTemplate();
   const total = totalCount(t);
   els.countInput.placeholder = String(total);
-  const hint =
+  const base =
     t.usePresets && t.presets.length > 0
-      ? `템플릿 총량: 변형 ${t.presets.length} × 반복 ${t.repeats} = ${total}장`
-      : `템플릿 총량: 시드만 변경 × ${t.repeats} = ${total}장`;
-  els.countInput.title = `생성할 장수 · ${hint}`;
-  els.countHint.textContent = hint;
+      ? `변형 ${t.presets.length} × 반복 ${t.repeats} = ${total}장`
+      : `시드만 변경 × ${t.repeats} = ${total}장`;
+  els.countInput.title = `생성할 장수 · 템플릿 총량 ${base}`;
+
+  const n = Math.max(1, Number(els.countInput.value) || total);
+  const perItem = parseAnlasCostFromGenerateButton();
+  // 단가를 못 읽으면 장수만 덩그러니 남아 입력란의 숫자와 겹쳐 보인다 — 위 주석대로
+  // 아예 비워서 :empty CSS 규칙에 맡긴다.
+  if (perItem === null) {
+    els.countHint.textContent = '';
+    return;
+  }
+  const cost = n * perItem;
+  const bits = [`${n}장`, `${cost.toLocaleString()} ₳`];
+  const anlas = readAnlas();
+  if (anlas !== null && anlas < cost) bits.push('⚠ Anlas 부족');
+  els.countHint.textContent = bits.join(' · ');
 }
 
 // ---------------------------------------------------------------------------

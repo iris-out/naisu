@@ -453,3 +453,115 @@ export function runSelfCheck(): SelfCheckResponse {
   const okCount = items.filter((i) => i.ok).length;
   return { items, okCount, total: items.length };
 }
+
+/** 파싱 실패 시에만 쓰는 어림값 (832×1216, 23step 기준 실측) — B03 */
+export const ANLAS_FALLBACK_PER_ITEM = 17;
+
+/**
+ * Generate 버튼(findGenerateButton, "Generate ... Anlas" 텍스트를 가진 버튼) 안에 실제
+ * 표시되는 단가를 파싱한다. NAI가 표기 형식을 바꾸면 실패할 수 있어 그 경우 null을
+ * 반환하고, 호출부가 어림값으로 폴백하며 "어림"임을 로그에 남긴다.
+ */
+export function parseAnlasCostFromGenerateButton(): number | null {
+  const text = findGenerateButton()?.textContent?.trim() ?? '';
+  if (!text) return null;
+
+  // ① "24 Anlas" 처럼 단어가 함께 있는 경우
+  const withWord = text.match(/([\d,]+)\s*Anlas/i);
+  if (withWord) {
+    const n = Number(withWord[1]!.replace(/,/g, ''));
+    if (Number.isFinite(n) && n > 0) return n;
+  }
+
+  // ② 실제 화면에서는 "Generate 1 Image  24⚡" 처럼 Anlas가 단어가 아니라 아이콘으로만
+  //    표시되는 경우가 있다. 이때 앞 숫자는 장수("1 Image"), 뒤 숫자가 가격이므로
+  //    마지막 숫자 토큰을 가격으로 본다.
+  const numbers = text.match(/[\d,]+/g);
+  if (numbers && numbers.length >= 2) {
+    const n = Number(numbers[numbers.length - 1]!.replace(/,/g, ''));
+    if (Number.isFinite(n) && n > 0) return n;
+  }
+
+  // 숫자가 하나뿐이면 그게 장수인지 가격인지 구분할 수 없다 — 추측하지 않고 실패로 둔다.
+  return null;
+}
+
+// ---------------------------------------------------------------------------
+// "저장할 이미지 없음" 진단
+//
+// findGridImages()/findMainImage()가 빈 결과를 돌려주는 이유는 여러 가지다 — 진짜로
+// 이미지가 없을 수도, NAI가 컨테이너 클래스를 바꿔서 스코프가 안 잡히는 것일 수도,
+// 스크롤로 화면 밖에 있는 것일 수도 있다. 사용자에게 "이미지 없음"만 말하면 어느
+// 쪽인지 알 수 없어서 다음 행동을 정할 수 없다. 각 필터 단계를 따로 세어 준다.
+// ---------------------------------------------------------------------------
+
+export interface ImageSearchDiagnosis {
+  /** 컨테이너 스코프 없이 페이지 전체에서 찾은 결과 이미지 후보 */
+  totalOnPage: number;
+  /** SEL.resultImage(= .image-gen-main 하위)로 좁힌 개수 */
+  inContainer: number;
+  /** 그중 blob: URL인 것 */
+  blob: number;
+  /** 그중 실제로 렌더된 것 (display:none 아님) */
+  rendered: number;
+  /** 그중 로딩이 끝나고 256px 이상인 것 */
+  loaded: number;
+  /** 그중 뷰포트와 겹치는 것 */
+  inViewport: number;
+  hasImageGenMain: boolean;
+  hasImageGenBody: boolean;
+  /** 사용자에게 그대로 보여줄 한 줄 — 원인별로 다음 행동이 달라진다 */
+  message: string;
+}
+
+export function diagnoseResultImages(): ImageSearchDiagnosis {
+  const bare = Array.from(document.querySelectorAll<HTMLImageElement>('img.image-grid-image'));
+  const scoped = Array.from(document.querySelectorAll<HTMLImageElement>(SEL.resultImage));
+  const blob = scoped.filter((i) => i.src.startsWith('blob:'));
+  const rendered = blob.filter((i) => i.offsetParent !== null);
+  const loaded = rendered.filter((i) => i.complete && i.naturalWidth >= 256);
+  const inViewport = loaded.filter((i) => isInViewport(i.getBoundingClientRect()));
+
+  const hasImageGenMain = document.querySelector(SEL.imageGenMain) !== null;
+  const hasImageGenBody = document.querySelector(SEL.imageGenBody) !== null;
+
+  // 원인별 안내 — 위에서부터 더 구체적인 것이 이긴다
+  let message: string;
+  if (bare.length === 0) {
+    message = '화면에 결과 이미지가 없습니다 — 먼저 NAI에서 이미지를 생성해 주세요';
+  } else if (scoped.length === 0) {
+    message =
+      `이미지 ${bare.length}장이 화면에 있는데 결과 영역 안에서는 찾지 못했습니다 — ` +
+      'NAI가 화면 구조를 바꿨을 수 있습니다(확장 업데이트가 필요합니다)';
+  } else if (blob.length === 0) {
+    message = '결과 이미지를 찾았지만 아직 불러오는 중입니다 — 잠시 후 다시 눌러 주세요';
+  } else if (loaded.length === 0) {
+    message = '결과 이미지가 아직 다 그려지지 않았습니다 — 잠시 후 다시 눌러 주세요';
+  } else if (inViewport.length === 0) {
+    message = '결과 이미지가 화면 밖에 있습니다 — 이미지가 보이도록 스크롤한 뒤 다시 눌러 주세요';
+  } else {
+    message = '결과 이미지를 찾지 못했습니다 (콘솔 로그를 확인해 주세요)';
+  }
+
+  return {
+    totalOnPage: bare.length,
+    inContainer: scoped.length,
+    blob: blob.length,
+    rendered: rendered.length,
+    loaded: loaded.length,
+    inViewport: inViewport.length,
+    hasImageGenMain,
+    hasImageGenBody,
+    message,
+  };
+}
+
+/** 진단 결과를 콘솔 한 줄로 — 사용자가 F12 캡처만 보내도 원인을 특정할 수 있게. */
+export function describeImageSearch(d: ImageSearchDiagnosis): string {
+  return (
+    `img.image-grid-image 전체=${d.totalOnPage} → ` +
+    `"${SEL.resultImage}" 매칭=${d.inContainer} → blob=${d.blob} → 렌더됨=${d.rendered} → ` +
+    `로드완료(≥256px)=${d.loaded} → 뷰포트 안=${d.inViewport} | ` +
+    `.image-gen-main=${d.hasImageGenMain} .image-gen-body=${d.hasImageGenBody}`
+  );
+}

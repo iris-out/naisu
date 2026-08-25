@@ -45,6 +45,65 @@ export const SETTINGS_RESET_KEYS: string[] = [
  */
 export type DownloadMode = 'hardclean' | 'clean' | 'raw' | 'both';
 
+/**
+ * 파일명이 이미 있을 때의 동작 — chrome.downloads.download의 conflictAction 그대로.
+ * 지금까지 'uniquify'로 고정되어 있었고, 덮어쓰기를 원하는 사용자가 손댈 방법이 없었다.
+ */
+export type ConflictAction = 'uniquify' | 'overwrite' | 'prompt';
+
+/** 워터마크가 붙는 모서리 */
+export type WatermarkPosition = 'tl' | 'tr' | 'bl' | 'br';
+
+export interface WatermarkOps {
+  on: boolean;
+  text: string;
+  position: WatermarkPosition;
+  /** 0~1 */
+  opacity: number;
+  /** 글자 크기 — 이미지 짧은 변 대비 % */
+  scalePct: number;
+  /** 글자 색 (#rrggbb) */
+  color: string;
+  /**
+   * 커스텀 폰트 링크. 비워두면 기본 폰트(sans-serif).
+   * Google Fonts CSS 링크(fonts.googleapis.com/css2?family=...) 또는 폰트 파일
+   * (.woff2/.woff/.ttf) 직접 링크를 받는다 — lib/webfont.ts가 실제 파일 URL로 정리한다.
+   */
+  fontUrl: string;
+}
+
+/**
+ * 저장 직전 이미지 후처리.
+ *
+ * ⚠ `raw`(원본) 모드에는 절대 적용하지 않는다 — "원본"이 원본이 아니게 되면 이 모드의
+ *   존재 이유가 사라진다. `both`에서도 클린 사본에만 적용되고 `_raw` 파일은 손대지 않는다.
+ *   이 규칙은 service-worker.ts::runStripAndSave() 한 곳에서만 강제된다.
+ */
+export interface ImageOps {
+  /** JPEG/WebP 품질 0~1 */
+  quality: number;
+  /** 출력 포맷. auto면 모드 규칙 그대로(하드클린→webp, 나머지→webp) */
+  format: 'auto' | 'jpg' | 'webp';
+  watermark: WatermarkOps;
+  /**
+   * 메타데이터 되쓰기 — 스트리핑의 반대. 프롬프트·시드는 지우고 여기 적은 한 줄만
+   * EXIF에 남긴다. 비워 두면 아무것도 쓰지 않는다.
+   */
+  credit: { on: boolean; text: string };
+}
+
+export const DEFAULT_IMAGE_OPS: ImageOps = {
+  quality: 1,
+  format: 'auto',
+  watermark: { on: false, text: '', position: 'br', opacity: 0.6, scalePct: 4, color: '#ffffff', fontUrl: '' },
+  credit: { on: false, text: '' },
+};
+
+/** ImageOps가 전부 기본값인지 — 기본값이면 후처리 패스를 아예 건너뛴다(불필요한 재인코딩 방지). */
+export function isImageOpsIdentity(ops: ImageOps): boolean {
+  return ops.format === 'auto' && !ops.watermark.on && !ops.credit.on;
+}
+
 export interface PromptPreset {
   id: string;
   text: string;
@@ -164,6 +223,30 @@ export interface Settings {
   discord: DiscordSettings;
   /** 마지막으로 본 이미지 메타 (popup 표시용) */
   lastMeta?: NaiMetadata;
+
+  // ---- A안(패널 개편) + 편의 기능에서 추가된 설정 ----
+
+  /** 파일명이 이미 있을 때: 번호 붙이기 / 덮어쓰기 / 매번 묻기 */
+  conflictAction: ConflictAction;
+  /**
+   * 배치가 끝나면 그 폴더에 프롬프트·시드 목록 CSV를 하나 남긴다.
+   * 클린 저장은 이미지에서 생성 정보를 지우므로, 재현 정보를 파일 밖에 남기는 짝이 필요하다.
+   */
+  writeManifest: boolean;
+  /** 저장 직전 후처리 (raw 모드에는 적용되지 않음) */
+  imageOps: ImageOps;
+  /**
+   * 원본 바이트를 몇 장까지 들고 있을지 — "다시 저장"에 필요하다.
+   * 0이면 캐시를 끄고, 그만큼 다시 저장도 불가능해진다.
+   */
+  cacheLimit: number;
+  /**
+   * Anlas 하한으로 일시정지한 뒤 자동으로 재개하기까지의 대기(분). 0이면 자동 재개하지 않는다.
+   * onAnlasFloor가 'pause'일 때만 의미가 있다.
+   */
+  autoResumeMin: number;
+  /** 새로고침 등으로 끊긴 배치가 있으면 패널에서 이어하기를 제안한다 */
+  offerResume: boolean;
 }
 
 export const DEFAULTS: Settings = {
@@ -173,7 +256,7 @@ export const DEFAULTS: Settings = {
   filenameTemplate: '{datetime}_{seed}',
   anlasFloor: 100,
   onAnlasFloor: 'stop',
-  cooldownMs: 1500,
+  cooldownMs: 2000,
   maxRetries: 3,
   timeoutMs: 60_000,
   keepColorProfile: false,
@@ -188,6 +271,12 @@ export const DEFAULTS: Settings = {
     events: { start: true, progress: true, item: false, pause: true, done: true, error: true },
     progressEvery: 10,
   },
+  conflictAction: 'uniquify',
+  writeManifest: false,
+  imageOps: DEFAULT_IMAGE_OPS,
+  cacheLimit: 24,
+  autoResumeMin: 0,
+  offerResume: true,
 };
 
 export async function getSettings(): Promise<Settings> {
@@ -205,6 +294,20 @@ export async function getSettings(): Promise<Settings> {
         ...(stored.discord?.events ?? {}),
       },
     },
+    // imageOps는 2단 중첩이라 얕은 병합이면 watermark/credit이 통째로 사라진다 —
+    // DEFAULTS 병합 규칙(부분 저장값도 항상 안전하게 읽힘)을 안쪽까지 지킨다.
+    imageOps: mergeImageOps(stored.imageOps),
+  };
+}
+
+/** 부분 저장된 ImageOps를 항상 완전한 값으로 채워서 돌려준다. */
+export function mergeImageOps(raw: Partial<ImageOps> | undefined): ImageOps {
+  if (!raw) return { ...DEFAULT_IMAGE_OPS };
+  return {
+    ...DEFAULT_IMAGE_OPS,
+    ...raw,
+    watermark: { ...DEFAULT_IMAGE_OPS.watermark, ...(raw.watermark ?? {}) },
+    credit: { ...DEFAULT_IMAGE_OPS.credit, ...(raw.credit ?? {}) },
   };
 }
 

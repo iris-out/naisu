@@ -11,6 +11,7 @@ import { must } from './ui/dom';
 import { homeScreen } from './screens/home';
 import { batchScreen } from './screens/batch';
 import { storageScreen } from './screens/storage';
+import { outputScreen } from './screens/output';
 import { safetyScreen } from './screens/safety';
 import { discordScreen } from './screens/discord';
 import { historyScreen } from './screens/history';
@@ -22,6 +23,7 @@ const SCREENS: Screen[] = [
   homeScreen,
   batchScreen,
   storageScreen,
+  outputScreen,
   safetyScreen,
   discordScreen,
   historyScreen,

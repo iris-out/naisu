@@ -5,6 +5,7 @@ import { findField } from '../settings-registry';
 import { must, $ } from '../ui/dom';
 import { bindInput } from '../ui/input';
 import { bindSeg } from '../ui/seg';
+import { bindSwitch } from '../ui/switch';
 import { helpLine, riskLine, bindRevertScreen, refreshScreenRisk } from '../ui/field-ui';
 import type { Screen } from './types';
 
@@ -74,7 +75,18 @@ export const safetyScreen: Screen = {
             <button data-v="pause">일시정지</button>
           </div>
           <div id="anlas-floor-action-help"></div>
+          <div class="kv-line" id="auto-resume-line" style="margin-top:8px">
+            <span class="kv-key">자동 재개까지</span>
+            <input type="number" id="auto-resume" min="0" max="240" value="0"> 분
+          </div>
+          <div id="auto-resume-help"></div>
         </div>
+
+        <label class="row sw-row">
+          <span><span class="row-ttl">끊긴 배치 이어하기 제안</span></span>
+          <span class="switch" id="offer-resume-sw"></span>
+        </label>
+        <div id="offer-resume-help"></div>
 
         <div class="kv-line">
           <span class="kv-key">오류 재시도</span>
@@ -170,6 +182,8 @@ export const safetyScreen: Screen = {
       current = { ...current, onAnlasFloor: onFloor };
       const floorInput = $<HTMLInputElement>('#anlas-floor');
       refreshAnlasHelp(Number(floorInput?.value) || 0);
+      // "중단"으로 바꾸면 자동 재개는 의미가 없어지므로 즉시 잠근다
+      syncAutoResume(current.autoResumeMin, onFloor);
       await setSettings({ onAnlasFloor: onFloor });
     });
 
@@ -206,6 +220,35 @@ export const safetyScreen: Screen = {
     });
     refreshTimeoutHelp(current.timeoutMs / 1000);
 
+    // ---------------- Anlas 자동 재개 · 이어하기 제안 ----------------
+    // 자동 재개는 "일시정지"일 때만 의미가 있다 — "중단"이면 배치 자체가 끝나 재개할 것이 없다.
+    const autoResumeLine = must('#auto-resume-line');
+    const autoResumeHelp = must('#auto-resume-help');
+    const syncAutoResume = (minutes: number, action: AnlasFloorAction): void => {
+      const usable = action === 'pause';
+      autoResumeLine.classList.toggle('locked', !usable);
+      must<HTMLInputElement>('#auto-resume').disabled = !usable;
+      autoResumeHelp.innerHTML = helpLine(
+        !usable
+          ? '최솟값 도달 시 동작이 "일시정지"일 때만 쓸 수 있습니다.'
+          : minutes <= 0
+            ? '0이면 자동으로 재개하지 않습니다 — 충전 후 패널에서 직접 재개하세요.'
+            : `${minutes}분마다 Anlas를 다시 확인해, 최솟값을 넘겼으면 스스로 이어서 실행합니다. 생성 간격 설정은 그대로 지켜집니다.`,
+      );
+    };
+    bindInput('#auto-resume', String(current.autoResumeMin), async (v) => {
+      const n = Math.max(0, Math.min(240, Math.round(Number(v) || 0)));
+      await setSettings({ autoResumeMin: n });
+      current = { ...current, autoResumeMin: n };
+      syncAutoResume(n, onFloor);
+    });
+    syncAutoResume(current.autoResumeMin, current.onAnlasFloor);
+
+    must('#offer-resume-help').innerHTML = helpLine(
+      '새로고침이나 탭 종료로 끊긴 배치가 있으면 패널 위쪽에 이어하기 줄이 뜹니다.',
+    );
+    bindSwitch(must('#offer-resume-sw'), current.offerResume, (v) => setSettings({ offerResume: v }));
+
     // ---------------- 상단 상태 배지 & 되돌리기 ----------------
     await refreshBadge();
 
@@ -228,6 +271,9 @@ export const safetyScreen: Screen = {
 
       must<HTMLInputElement>('#timeout').value = String(current.timeoutMs / 1000);
       refreshTimeoutHelp(current.timeoutMs / 1000);
+
+      must<HTMLInputElement>('#auto-resume').value = String(current.autoResumeMin);
+      syncAutoResume(current.autoResumeMin, current.onAnlasFloor);
 
       await refreshBadge();
     });

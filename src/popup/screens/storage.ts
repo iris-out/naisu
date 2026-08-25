@@ -7,10 +7,12 @@ import {
   renderFolder,
   FILENAME_TOKENS,
   FOLDER_TOKENS,
+  type ConflictAction,
   type DownloadMode,
   type FilenameContext,
   type Settings,
 } from '../../lib/storage';
+import { opsSummary } from '../../lib/image-ops';
 import { findField, type RiskLevel } from '../settings-registry';
 import { $, $$, must } from '../ui/dom';
 import { bindInput } from '../ui/input';
@@ -257,6 +259,41 @@ export const storageScreen: Screen = {
         </label>
         <div id="keep-color-help"></div>
       </div>
+
+      <div class="card">
+        <div class="lbl">저장 동작</div>
+        <div class="lbl" style="margin-top:4px">같은 이름이 이미 있으면</div>
+        <div class="seg" id="conflict-seg" role="radiogroup" style="--seg-n:3">
+          <span class="seg-indicator"></span>
+          <button data-v="uniquify">번호 붙이기</button>
+          <button data-v="overwrite">덮어쓰기</button>
+          <button data-v="prompt">매번 묻기</button>
+        </div>
+        <div id="conflict-help"></div>
+
+        <label class="row sw-row" style="margin-top:8px">
+          <span><span class="row-ttl">배치 매니페스트 저장</span></span>
+          <span class="switch" id="manifest-sw"></span>
+        </label>
+        <div id="manifest-help"></div>
+
+        <label class="full" style="margin-top:8px">
+          <span class="lbl">원본 캐시 장수</span>
+          <input id="cache-limit" type="number" min="0" max="200" step="1">
+        </label>
+        <div id="cache-help"></div>
+      </div>
+
+      <div class="card">
+        <button class="m-row" data-nav="output" type="button">
+          <span class="m-txt">
+            <span class="m-ttl">저장 후처리</span>
+            <span class="m-sub">크기 · 품질 · 비율 · 워터마크 · 프로필</span>
+          </span>
+          <span class="m-val" id="storage-ops-val">—</span>
+          <span class="m-ch">›</span>
+        </button>
+      </div>
     </section>
   `;
   },
@@ -348,7 +385,54 @@ export const storageScreen: Screen = {
       await refreshScreenRisk($('#storage-risk'), 'storage');
     };
 
+    // ---- 저장 동작 (이름 충돌 · 매니페스트 · 원본 캐시) ----
+    const conflictHelp = must('#conflict-help');
+    const syncConflictHelp = (v: ConflictAction): void => {
+      conflictHelp.innerHTML = helpLine(
+        v === 'uniquify'
+          ? '기존 파일을 남기고 이름 뒤에 (1), (2)를 붙입니다.'
+          : v === 'overwrite'
+            ? '같은 이름의 기존 파일을 지웁니다 — 배치에서 파일명이 겹치면 결과가 한 장만 남을 수 있습니다.'
+            : '저장할 때마다 브라우저 저장 대화상자가 뜹니다. 자동 배치에는 맞지 않습니다.',
+      );
+    };
+    bindSeg(must('#conflict-seg'), s.conflictAction, async (v) => {
+      await setSettings({ conflictAction: v as ConflictAction });
+      syncConflictHelp(v as ConflictAction);
+      flashHint('저장됨');
+    });
+    syncConflictHelp(s.conflictAction);
+
+    must('#manifest-help').innerHTML = helpLine(
+      '배치 폴더에 프롬프트·시드 목록 CSV를 하나 남깁니다. 클린 저장은 이미지에서 그 정보를 지우므로, 나중에 재현하려면 이 파일이 필요합니다.',
+    );
+    bindSwitch(must('#manifest-sw'), s.writeManifest, (v) => setSettings({ writeManifest: v }));
+
+    const cacheHelp = must('#cache-help');
+    const syncCacheHelp = (n: number): void => {
+      cacheHelp.innerHTML = helpLine(
+        n <= 0
+          ? '0이면 원본을 보관하지 않습니다 — 패널의 "다시 저장"과 "이미지 복사"를 쓸 수 없습니다.'
+          : `최근 ${n}장의 원본을 브라우저에 보관합니다. 하드클린이 실패했을 때 다시 저장할 수 있는 유일한 방법입니다(한 장당 약 1~3MB).`,
+      );
+    };
+    bindInput('#cache-limit', String(s.cacheLimit), async (v) => {
+      const n = Math.max(0, Math.min(200, Math.round(Number(v) || 0)));
+      await setSettings({ cacheLimit: n });
+      syncCacheHelp(n);
+      flashHint('저장됨');
+    });
+    syncCacheHelp(s.cacheLimit);
+
     bindRevertScreen(must('#storage-revert'), 'storage', refreshAll);
     await refreshScreenRisk($('#storage-risk'), 'storage');
+  },
+
+  async enter() {
+    // 후처리 화면에서 값을 바꾸고 돌아왔을 때 요약이 옛 값으로 남아 있지 않게 한다.
+    const el = $('#storage-ops-val');
+    if (!el) return;
+    const fresh = await getSettings();
+    el.textContent = opsSummary(fresh.imageOps) || '없음';
   },
 };

@@ -372,6 +372,15 @@ export const homeScreen: Screen = {
             <span class="m-val" id="m-storage-val">—</span>
             <span class="m-ch">${icon('chevron_right', 15)}</span>
           </button>
+          <button class="m-row" data-nav="output">
+            <span class="m-ico">${icon('sliders', 17)}</span>
+            <span class="m-txt">
+              <span class="m-ttl">저장 후처리</span>
+              <span class="m-sub">품질 · 포맷 · 워터마크 · 크레딧</span>
+            </span>
+            <span class="m-val" id="m-output-val">—</span>
+            <span class="m-ch">${icon('chevron_right', 15)}</span>
+          </button>
         </nav>
 
         <div class="m-sec">기타 및 정보</div>
@@ -481,6 +490,8 @@ export const homeScreen: Screen = {
     const storageRisk = riskOfScreen('storage', s);
     setBadge('#m-storage-val', riskBadge(storageRisk.level, labelDownloadMode(s.downloadMode)));
     set('#m-storage-sub', `${s.downloadFolder}/ · ${s.filenameTemplate}`);
+
+    set('#m-output-val', findField('imageOps')?.describe?.(s) ?? '없음');
 
     set(
       '#m-discord-val',
